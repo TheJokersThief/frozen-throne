@@ -45,7 +45,8 @@ type WindowWatcher struct {
 	seeded bool
 	state  map[int64]*winState
 	logins map[int64]string // installation id -> account login
-	repos  map[int64]string // repo id -> owner/name
+	repos  map[int64]string // repo id -> owner/name (last known)
+	fresh  map[int64]bool   // repo ids re-read this tick
 }
 
 // NewWindowWatcher builds a WindowWatcher.
@@ -105,7 +106,11 @@ func (w *WindowWatcher) Tick(ctx context.Context, now time.Time) {
 		}
 	}
 
-	var events []Event
+	w.fresh = map[int64]bool{} // repo names are re-read once per tick (renames)
+
+	// activeNow holds the schedules inside a window right now, for overlap.
+	activeNow := map[int64]model.Schedule{}
+	next := map[int64]*winState{}
 	for id, s := range current {
 		prev := w.state[id]
 		win, err := engine.NextWindow(s, now)
@@ -113,52 +118,91 @@ func (w *WindowWatcher) Tick(ctx context.Context, now time.Time) {
 			w.o.Logger.Warn("window watcher: bad schedule", "schedule", id, "err", err)
 			if prev != nil {
 				prev.sched = s
+				next[id] = prev
 			}
 			continue
 		}
 		active := win != nil && win.Contains(now)
-		was := prev != nil && prev.active
-		w.state[id] = &winState{active: active, sched: s}
 		if active {
+			activeNow[id] = s
 			w.warmRepo(ctx, s)
 		}
-		if !w.seeded || active == was {
+		next[id] = &winState{active: active, sched: s}
+	}
+
+	var events []Event
+	emit := func(kind Kind, s model.Schedule) bool {
+		ev := w.event(ctx, kind, s)
+		if kind == KindWindowEnd {
+			ev.StillFrozenBy = overlap(activeNow, s)
+		}
+		if ev.Org == "" || (ev.Scope == "repo" && ev.Repo == "") {
+			w.o.Logger.Warn("window watcher: event deferred, names unresolved", "kind", ev.Kind, "schedule", ev.Schedule)
+			return false
+		}
+		events = append(events, ev)
+		return true
+	}
+	for id, st := range next {
+		prev := w.state[id]
+		was := prev != nil && prev.active
+		if !w.seeded || st.active == was {
 			continue
 		}
 		kind := KindWindowEnd
-		if active {
+		if st.active {
 			kind = KindWindowStart
 		}
-		events = append(events, w.event(ctx, kind, s))
+		if !emit(kind, st.sched) {
+			// Keep the old state so the next tick retries.
+			if prev != nil {
+				next[id] = prev
+			} else {
+				delete(next, id)
+			}
+		}
 	}
 	// Schedules that vanished or were disabled.
 	for id, st := range w.state {
-		if _, ok := current[id]; ok {
+		if _, ok := current[id]; ok || !st.active || !w.seeded {
 			continue
 		}
-		delete(w.state, id)
-		if st.active && w.seeded {
-			events = append(events, w.event(ctx, KindWindowEnd, st.sched))
+		if !emit(KindWindowEnd, st.sched) {
+			next[id] = st
 		}
 	}
+	w.state = next
 	w.seeded = true
 
 	for _, ev := range events {
-		if ev.Org == "" || (ev.Scope == "repo" && ev.Repo == "") {
-			w.o.Logger.Warn("window watcher: event skipped, names unresolved", "kind", ev.Kind, "schedule", ev.Schedule)
-			continue
-		}
 		w.o.Notifier.Notify(ev)
 	}
 }
 
+// overlap names another active schedule that still covers the target of
+// ended: for a repo schedule, an org-wide or same-repo one; for an org-wide
+// schedule, another org-wide one. "" if none.
+func overlap(active map[int64]model.Schedule, ended model.Schedule) string {
+	best := ""
+	for id, o := range active {
+		if id == ended.ID || o.InstallationID != ended.InstallationID {
+			continue
+		}
+		covers := o.RepoID == nil || (ended.RepoID != nil && *o.RepoID == *ended.RepoID)
+		if covers && (best == "" || o.Name < best) {
+			best = o.Name
+		}
+	}
+	return best
+}
+
+// warmRepo refreshes the cached name of s's repo once per tick. On failure the
+// last known name (if any) is kept.
 func (w *WindowWatcher) warmRepo(ctx context.Context, s model.Schedule) {
-	if s.RepoID == nil {
+	if s.RepoID == nil || w.fresh[*s.RepoID] {
 		return
 	}
-	if _, ok := w.repos[*s.RepoID]; ok {
-		return
-	}
+	w.fresh[*s.RepoID] = true
 	if r, err := w.o.Store.GetRepo(ctx, *s.RepoID); err == nil {
 		w.repos[*s.RepoID] = r.Owner + "/" + r.Name
 	}

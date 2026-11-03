@@ -189,3 +189,65 @@ func TestWindowDisabledWhileActive(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+type flakyRepoStore struct {
+	store.Store
+	fail bool
+}
+
+func (f *flakyRepoStore) GetRepo(ctx context.Context, id int64) (model.Repo, error) {
+	if f.fail {
+		return model.Repo{}, context.DeadlineExceeded
+	}
+	return f.Store.GetRepo(ctx, id)
+}
+
+func TestWindowRetriesWhenRepoLookupFails(t *testing.T) {
+	e := newWinEnv(t)
+	fs := &flakyRepoStore{Store: e.st}
+	e.w = NewWindowWatcher(WindowOptions{Store: fs, Notifier: e.rec})
+	rid := int64(10)
+	e.create(oneOff("web", t0.Add(time.Hour), t0.Add(5*time.Hour), &rid))
+	e.tick(t0)
+	fs.fail = true
+	if got := e.tick(t0.Add(90 * time.Minute)); len(got) != 0 {
+		t.Fatalf("emitted despite failed lookup: %v", got)
+	}
+	fs.fail = false
+	got := e.tick(t0.Add(100 * time.Minute))
+	if len(got) != 1 || got[0].Kind != KindWindowStart || got[0].Repo != "acme/web" {
+		t.Fatalf("retry = %+v", got)
+	}
+}
+
+func TestWindowEndMentionsOverlappingSchedule(t *testing.T) {
+	e := newWinEnv(t)
+	rid := int64(10)
+	e.create(oneOff("org-wide", t0.Add(time.Hour), t0.Add(4*time.Hour), nil))
+	e.create(oneOff("web-only", t0.Add(time.Hour), t0.Add(2*time.Hour), &rid))
+	e.tick(t0)
+	e.tick(t0.Add(90 * time.Minute)) // both start
+	got := e.tick(t0.Add(150 * time.Minute))
+	if len(got) != 1 || got[0].Schedule != "web-only" || got[0].Kind != KindWindowEnd || got[0].StillFrozenBy != "org-wide" {
+		t.Fatalf("repo end = %+v", got)
+	}
+	got = e.tick(t0.Add(5 * time.Hour))
+	if len(got) != 1 || got[0].Schedule != "org-wide" || got[0].StillFrozenBy != "" {
+		t.Fatalf("org end = %+v", got)
+	}
+}
+
+func TestWindowPicksUpRepoRename(t *testing.T) {
+	e := newWinEnv(t)
+	rid := int64(10)
+	e.create(oneOff("web", t0.Add(time.Hour), t0.Add(2*time.Hour), &rid))
+	e.tick(t0)
+	e.tick(t0.Add(90 * time.Minute))
+	if err := e.st.UpsertRepo(context.Background(), model.Repo{ID: 10, InstallationID: 1, Owner: "acme", Name: "site", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	got := e.tick(t0.Add(3 * time.Hour))
+	if len(got) != 1 || got[0].Repo != "acme/site" {
+		t.Fatalf("got %+v", got)
+	}
+}

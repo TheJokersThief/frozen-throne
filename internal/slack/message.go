@@ -33,6 +33,7 @@ type Event struct {
 	Reason         string
 	PRNumber       int
 	Schedule       string // schedule name
+	StillFrozenBy  string // window end only: another active schedule still covering the target
 	DashboardURL   string
 }
 
@@ -119,7 +120,11 @@ func Message(ev Event) Payload {
 	case KindWindowStart:
 		head = fmt.Sprintf(":snowflake: freeze window started by schedule on %s%s", target, sched)
 	case KindWindowEnd:
-		head = fmt.Sprintf(":sunny: freeze window ended by schedule on %s%s", target, sched)
+		name := ""
+		if ev.Schedule != "" {
+			name = " " + esc(ev.Schedule)
+		}
+		head = fmt.Sprintf(":sunny: schedule window%s ended on %s", name, target)
 	default:
 		head = fmt.Sprintf("%s: %s on %s", esc(string(ev.Kind)), actor, target)
 	}
@@ -128,6 +133,9 @@ func Message(ev Event) Payload {
 	b.WriteString(head)
 	if ev.Reason != "" {
 		b.WriteString("\nReason: " + esc(ev.Reason))
+	}
+	if ev.Kind == KindWindowEnd && ev.StillFrozenBy != "" {
+		b.WriteString("\nStill frozen by schedule " + esc(ev.StillFrozenBy))
 	}
 	if ev.DashboardURL != "" {
 		b.WriteString("\n<" + linkURL(ev.DashboardURL) + "|Open dashboard>")

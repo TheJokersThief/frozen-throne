@@ -74,6 +74,12 @@ func TestMessageContent(t *testing.T) {
 		{"bypass_end", func(e *Event) { e.Kind = KindBypassEnd; e.Repo = "acme/api"; e.Scope = "repo"; e.PRNumber = 42 }, []string{"acme/api", "#42", "ended"}},
 		{"window_start", func(e *Event) { e.Kind = KindWindowStart; e.Actor = ""; e.Schedule = "nightly" }, []string{"schedule", "nightly", "acme"}},
 		{"window_end", func(e *Event) { e.Kind = KindWindowEnd; e.Actor = ""; e.Schedule = "nightly" }, []string{"schedule", "nightly", "ended"}},
+		{"window_end_overlap", func(e *Event) {
+			e.Kind = KindWindowEnd
+			e.Actor = ""
+			e.Schedule = "nightly"
+			e.StillFrozenBy = "quarter-close"
+		}, []string{"nightly", "ended", "Still frozen by schedule quarter-close"}},
 	}
 	for _, c := range cases {
 		ev := base
