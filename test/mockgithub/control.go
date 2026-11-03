@@ -12,6 +12,8 @@ func (s *Server) routesControl() {
 	s.mux.HandleFunc("POST /_mock/repos", s.ctlRepo)
 	s.mux.HandleFunc("POST /_mock/pulls", s.ctlPull)
 	s.mux.HandleFunc("GET /_mock/check-runs", s.ctlCheckRuns)
+	s.mux.HandleFunc("POST /_mock/users", s.ctlUser)
+	s.mux.HandleFunc("PUT /_mock/default-user", s.ctlDefaultUser)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -109,4 +111,45 @@ func (s *Server) ctlCheckRuns(w http.ResponseWriter, r *http.Request) {
 		out = append(out, cr)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ctlUser creates or replaces a user (by login) and returns an OAuth code
+// that is good for one token exchange.
+func (s *Server) ctlUser(w http.ResponseWriter, r *http.Request) {
+	var in User
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Login == "" {
+		ghError(w, http.StatusUnprocessableEntity, "login is required")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if old, ok := s.st.users[in.Login]; ok {
+		delete(s.st.userTokens, old.Token)
+	}
+	if in.Token == "" {
+		in.Token = "gho_" + randomHex(20)
+	}
+	s.st.users[in.Login] = &in
+	s.st.userTokens[in.Token] = in.Login
+	writeJSON(w, http.StatusCreated, map[string]string{"code": s.newCode(in.Login), "token": in.Token})
+}
+
+func (s *Server) ctlDefaultUser(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Login string `json:"login"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.st.users[in.Login]; !ok {
+		ghError(w, http.StatusUnprocessableEntity, "unknown user "+in.Login)
+		return
+	}
+	s.st.defaultUser = in.Login
+	w.WriteHeader(http.StatusNoContent)
 }

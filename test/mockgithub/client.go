@@ -109,3 +109,19 @@ func (c *Client) WaitForCheckRun(ctx context.Context, owner, repo, headSHA strin
 		}
 	}
 }
+
+// SeedUser creates or replaces a user and returns an OAuth code good for one
+// token exchange (the user can also sign in through the authorize redirect).
+func (c *Client) SeedUser(ctx context.Context, in User) (code string, err error) {
+	var out struct {
+		Code string `json:"code"`
+	}
+	err = c.call(ctx, http.MethodPost, "/_mock/users", in, &out)
+	return out.Code, err
+}
+
+// SetDefaultUser chooses who the authorize redirect signs in when no login
+// parameter is given.
+func (c *Client) SetDefaultUser(ctx context.Context, login string) error {
+	return c.call(ctx, http.MethodPut, "/_mock/default-user", map[string]string{"login": login}, nil)
+}
