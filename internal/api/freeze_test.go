@@ -223,10 +223,3 @@ func TestPermissionErrors(t *testing.T) {
 	e.perms.err = nil
 	e.expect(e.do(c, "GET", "/auth/me", nil), 401)
 }
-
-func TestSlackStubbed(t *testing.T) {
-	e := newEnv(t)
-	c := e.login("alice")
-	e.expect(e.do(c, "GET", "/orgs/acme/slack", nil), http.StatusNotImplemented)
-	e.expect(e.do(c, "POST", "/orgs/acme/slack/test", nil), http.StatusNotImplemented)
-}

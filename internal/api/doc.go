@@ -11,5 +11,5 @@ package api
 //	})
 //	http.ListenAndServe(addr, srv.Handler())
 //
-// Not implemented yet (answer 501): Slack settings endpoints, which depend on
-// the notifications task.
+// Slack: pass Deps.Slack (a *slack.Notifier) to deliver notifications and
+// the settings test endpoint; Config.DashboardURL sets the link base.
