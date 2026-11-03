@@ -80,8 +80,9 @@ func (e *Env) AddRepo(name string) int64 {
 	e.T.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// A separate id range: RepoID+n would equal the next env's RepoID.
-	id := e.RepoID + 500_000_000_000 + int64(len(e.maintainer.RepoPerms))
+	// A separate id range with a stride wider than the per-env step (1), so
+	// neither RepoID+n nor another env's added repos can coincide.
+	id := e.RepoID + 500_000_000_000 + int64(len(e.maintainer.RepoPerms))*1_000_000
 	if err := e.S.Mock.SeedRepo(ctx, mockgithub.Repo{InstallationID: e.InstallationID, ID: id, Owner: e.Org, Name: name, DefaultBranch: "main"}); err != nil {
 		e.T.Fatalf("seed repo: %v", err)
 	}
