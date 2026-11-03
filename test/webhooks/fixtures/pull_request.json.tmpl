@@ -1,0 +1,22 @@
+{
+  "action": {{q .Action}},
+  "number": {{.PRNumber}},
+  "pull_request": {
+    "url": "https://api.github.com/repos/{{.Owner}}/{{.Repo}}/pulls/{{.PRNumber}}",
+    "id": {{printf "%d" .PRNumber}}0000001, "number": {{.PRNumber}}, "state": {{q .State}}, "locked": false,
+    "title": "Update widgets", "user": {{template "sender" .}}, "body": "Tweaks the widgets.",
+    "draft": {{.Draft}}, "merged": {{.Merged}},
+    "merged_at": {{if .Merged}}"2026-01-15T12:00:00Z"{{else}}null{{end}},
+    "closed_at": {{if eq .State "closed"}}"2026-01-15T12:00:00Z"{{else}}null{{end}},
+    "created_at": "2026-01-15T10:00:00Z", "updated_at": "2026-01-15T10:05:00Z",
+    "html_url": "https://github.com/{{.Owner}}/{{.Repo}}/pull/{{.PRNumber}}",
+    "head": { "label": "{{.Owner}}:feature", "ref": "feature", "sha": {{q .HeadSHA}}, "user": {{template "owner" .}}, "repo": {{template "repository" .}} },
+    "base": { "label": "{{.Owner}}:{{.DefaultBranch}}", "ref": {{q .DefaultBranch}}, "sha": {{q .BaseSHA}}, "user": {{template "owner" .}}, "repo": {{template "repository" .}} },
+    "author_association": "MEMBER", "mergeable_state": "unknown",
+    "commits": 1, "additions": 3, "deletions": 1, "changed_files": 1
+  },
+  "repository": {{template "repository" .}},
+  "organization": {{template "owner" .}},
+  "sender": {{template "sender" .}},
+  "installation": {{template "thin_installation" .}}
+}

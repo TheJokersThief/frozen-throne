@@ -1,0 +1,9 @@
+{
+  "action": {{q .Action}},
+  "installation": {{template "full_installation" .}},
+  "repository_selection": "selected",
+  "repositories_added": [ {{if eq .Action "added"}}{{template "thin_repo" .}}{{end}} ],
+  "repositories_removed": [ {{if eq .Action "removed"}}{{template "thin_repo" .}}{{end}} ],
+  "requester": null,
+  "sender": {{template "sender" .}}
+}

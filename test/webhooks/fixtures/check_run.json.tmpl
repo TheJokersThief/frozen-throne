@@ -1,0 +1,22 @@
+{
+  "action": {{q .Action}},
+  "check_run": {
+    "id": 4400000001, "node_id": "CR_kwDOAAAAAAAAAAE", "name": "frozen-throne",
+    "head_sha": {{q .HeadSHA}}, "external_id": "", "status": "completed", "conclusion": "failure",
+    "started_at": "2026-01-15T10:00:00Z", "completed_at": "2026-01-15T10:00:05Z",
+    "html_url": "https://github.com/{{.Owner}}/{{.Repo}}/runs/4400000001",
+    "url": "https://api.github.com/repos/{{.Owner}}/{{.Repo}}/check-runs/4400000001",
+    "output": { "title": "Frozen", "summary": "Merging is frozen.", "text": null, "annotations_count": 0 },
+    "check_suite": { "id": 5500000001, "head_branch": "feature", "head_sha": {{q .HeadSHA}}, "status": "completed", "conclusion": "failure" },
+    "app": { "id": 123456, "slug": "frozen-throne", "name": "frozen-throne", "owner": {{template "owner" .}} },
+    "pull_requests": [
+      { "id": {{printf "%d" .PRNumber}}0000001, "number": {{.PRNumber}}, "url": "https://api.github.com/repos/{{.Owner}}/{{.Repo}}/pulls/{{.PRNumber}}",
+        "head": { "ref": "feature", "sha": {{q .HeadSHA}}, "repo": { "id": {{.RepoID}}, "name": {{q .Repo}}, "url": "https://api.github.com/repos/{{.Owner}}/{{.Repo}}" } },
+        "base": { "ref": {{q .DefaultBranch}}, "sha": {{q .BaseSHA}}, "repo": { "id": {{.RepoID}}, "name": {{q .Repo}}, "url": "https://api.github.com/repos/{{.Owner}}/{{.Repo}}" } } }
+    ]
+  },
+  "repository": {{template "repository" .}},
+  "organization": {{template "owner" .}},
+  "sender": {{template "sender" .}},
+  "installation": {{template "thin_installation" .}}
+}
