@@ -22,3 +22,5 @@ storage/
 *.db-wal
 node_modules/
 web/dist/
+dev.db
+dev.db-*
