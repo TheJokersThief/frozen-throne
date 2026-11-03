@@ -20,6 +20,9 @@ func (r *Reconciler) refreshSchedule(ctx context.Context) {
 	}
 	next, err := r.computeNextChanges(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		r.cfg.Logger.Error("reconcile: compute schedule boundaries", "err", err)
 		return
 	}
