@@ -12,6 +12,8 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
+	// Wired into newReconciler once the server exists.
+	_ = flag.Duration("reconcile-interval", defaultReconcileInterval, "how often to re-check every repo to heal missed webhooks")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)

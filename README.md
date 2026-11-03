@@ -20,6 +20,7 @@ recorded reason.
 | `internal/store` | Store interfaces (`store.go`), embedded SQL migrations (`migrations/`) and the SQLite implementation. |
 | `internal/engine` | Pure freeze evaluation: "is repo X frozen at T, considering bypass for PR N". Interface and types only for now. |
 | `internal/github` | GitHub App: webhooks, Check Runs (to come). |
+| `internal/reconcile` | Keeps Check Runs correct: triggers, window-boundary timers and a periodic pass feed a fair, bounded work queue with rate-limit backoff. |
 | `internal/api` | HTTP handlers, OAuth, permissions (to come). |
 | `api/openapi.yaml` | The REST API contract. Source of truth for handlers and the web client. |
 | `web/` | React + TypeScript (Vite) dashboard. |
