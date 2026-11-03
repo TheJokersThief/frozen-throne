@@ -1,4 +1,4 @@
-.PHONY: all build test lint vet fmt web-install web-build web-typecheck gen-api lint-api check
+.PHONY: all build test lint vet fmt web-install web-test web-build web-typecheck gen-api lint-api check
 
 GO ?= go
 
@@ -24,6 +24,9 @@ web-install:
 web-typecheck: web-install
 	cd web && npm run typecheck
 
+web-test: web-install
+	cd web && npm test
+
 web-build: web-install
 	cd web && npm run build
 
@@ -33,4 +36,4 @@ gen-api: web-install ## Regenerate web/src/api/schema.d.ts from api/openapi.yaml
 lint-api: web-install ## Validate api/openapi.yaml
 	cd web && npm run lint:api
 
-check: lint test build web-build ## Everything CI runs
+check: lint test web-test build web-build ## Everything CI runs

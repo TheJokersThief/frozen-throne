@@ -55,6 +55,29 @@ make lint-api     # validate the spec (redocly)
 
 CI fails if the committed types are out of date.
 
+### Web dashboard
+
+React + TypeScript + Vite in `web/`. Pages: all repos at a glance (search, filter by
+org / frozen state, quick freeze/thaw with confirm + reason, org-wide freeze), repo
+detail (reasons, freeze windows, per-PR bypass, public status, recent audit), org
+page (org freeze + org-wide windows) and the audit log.
+
+Run it **without a backend** against a mocked API (MSW implements `api/openapi.yaml`
+in the browser with seeded data and the freeze semantics: any-of org/repo/window,
+bypasses cleared on thaw, permission checks per role):
+
+```sh
+cd web
+npm ci
+npm run dev:mock      # http://localhost:5173, signed in as "octocat"
+```
+
+Run against the real server instead with `npm run dev` (proxies `/api` to
+`localhost:8080`). Other scripts: `npm test` (component tests, same mock handlers),
+`npm run typecheck`, `npm run build`. The mock is only bundled when `VITE_MOCK=1`
+(`npm run build:mock`); a normal build contains no mock code. The app uses
+client-side routes, so the server must serve `index.html` for non-`/api` paths.
+
 ### Database
 
 SQLite via the pure-Go `modernc.org/sqlite` driver (no cgo, so the binary stays
