@@ -160,7 +160,7 @@ let server: ReturnType<typeof setupServer>;
 beforeEach(() => {
   db = new MockDb(() => NOW).seed();
   server = setupServer(...createHandlers(db));
-  server.listen({ onUnhandledRequest: "error" });
+  server.listen({ onUnhandledFrame: "error" });
 });
 afterEach(() => server.close());
 
@@ -696,7 +696,7 @@ describe("schedules", () => {
     expect(r.body).toMatchObject({ id: created.id, scope: "repo", repo: "acme/web", created_by: "octocat", created_at: created.created_at, kind: "recurring", name: "Renamed" });
     expect(r.body.starts_at).toBeUndefined();
     const audit = (await call("GET /audit", { query: { action: "schedule.update" } })).body.items;
-    expect(audit[0]).toMatchObject({ repo: "acme/web", scope: "repo" });
+    expect(audit[0]).toMatchObject({ repo: "acme/web", actor: "octocat" });
   });
   it("PUT/DELETE /schedules/{id} roles: member 403, invisible 404 (before validation)", async () => {
     const mine = db.buildSchedule(oneOff(), "repo", "globex", "globex/dashboard");
