@@ -45,6 +45,8 @@ Env vars summary: `INTEGRATION_MODE`, `FT_APP_URL`, `FT_MOCK_URL`,
 and `APP_PORT` (defaults 18081 / 18080 when you run the file by hand:
 `docker compose -f test/docker-compose.yml up --build`).
 
+On Linux the bind-mounted `test/testdata/app-key.pem` must be world-readable (the containers run as uid 65532), e.g. `chmod 644 test/testdata/app-key.pem`.
+
 Compose mode needs a Docker daemon. It was written against
 `docker compose config` validation only; check it on a machine with Docker
 before relying on it.
