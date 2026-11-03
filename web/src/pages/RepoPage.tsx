@@ -1,7 +1,8 @@
 import { Link, useParams } from "react-router-dom";
-import { ApiError, errorMessage } from "../api/client";
+import { ApiError } from "../api/client";
 import { useAudit, useRepo, useSetPublicStatus } from "../api/hooks";
 import { BypassPanel } from "../components/BypassPanel";
+import { ErrorNotice, NotFound } from "../components/ErrorNotice";
 import { FreezeControl } from "../components/FreezeControl";
 import { ScheduleManager } from "../components/ScheduleManager";
 import { ReasonList, StatusBadge } from "../components/Status";
@@ -16,13 +17,8 @@ export function RepoPage() {
 
   if (q.isLoading) return <p className="empty" role="status">Loading…</p>;
   if (q.isError) {
-    const notFound = q.error instanceof ApiError && q.error.status === 404;
-    return (
-      <p className="notice error" role="alert">
-        {notFound ? "Repository not found, or you do not have access." : errorMessage(q.error)}{" "}
-        <Link to="/">Back to repositories</Link>
-      </p>
-    );
+    if (q.error instanceof ApiError && q.error.status === 404) return <NotFound title="Repository not found" what="repository" />;
+    return <ErrorNotice error={q.error} what="this repository" onRetry={() => void q.refetch()} />;
   }
   const r = q.data!;
   const p = r.permissions;

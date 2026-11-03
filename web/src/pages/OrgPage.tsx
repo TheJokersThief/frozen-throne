@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
-import { ApiError, errorMessage } from "../api/client";
+import { ApiError } from "../api/client";
 import { useOrg, useOrgSchedules } from "../api/hooks";
+import { ErrorNotice, NotFound } from "../components/ErrorNotice";
 import { FreezeControl } from "../components/FreezeControl";
 import { ScheduleManager } from "../components/ScheduleManager";
 import { ReasonList, StatusBadge } from "../components/Status";
@@ -11,12 +12,8 @@ export function OrgPage() {
   const schedules = useOrgSchedules(org);
   if (o.isLoading) return <p className="empty" role="status">Loading…</p>;
   if (o.isError) {
-    return (
-      <p className="notice error" role="alert">
-        {o.error instanceof ApiError && o.error.status === 404 ? "Organization not found." : errorMessage(o.error)}{" "}
-        <Link to="/">Back</Link>
-      </p>
-    );
+    if (o.error instanceof ApiError && o.error.status === 404) return <NotFound title="Organization not found" what="organization" />;
+    return <ErrorNotice error={o.error} what="this organization" onRetry={() => void o.refetch()} />;
   }
   const d = o.data!;
   const p = d.permissions;

@@ -1,8 +1,8 @@
 import { useDeferredValue, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { errorMessage } from "../api/client";
 import { useOrgs, useRepos } from "../api/hooks";
 import type { Org, RepoSummary } from "../api/types";
+import { ErrorNotice } from "../components/ErrorNotice";
 import { FreezeControl } from "../components/FreezeControl";
 import { ReasonChips, StatusBadge } from "../components/Status";
 
@@ -59,7 +59,7 @@ export function Dashboard() {
       </div>
 
       {repos.isError ? (
-        <p className="notice error" role="alert">Could not load repositories: {errorMessage(repos.error)}</p>
+        <ErrorNotice error={repos.error} what="repositories" onRetry={() => void repos.refetch()} />
       ) : repos.isLoading ? (
         <p className="empty" role="status">Loading repositories…</p>
       ) : repos.data!.items.length === 0 ? (
