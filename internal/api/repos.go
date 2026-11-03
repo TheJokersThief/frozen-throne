@@ -192,7 +192,7 @@ func (s *Server) freezeRepo(c *call) error {
 		}
 		return err
 	}
-	s.emit(ctx, pendingEvents{{InstallationID: rc.inst.ID, RepoID: &rc.repo.ID, Action: model.AuditFreeze}})
+	s.emit(ctx, pendingEvents{{InstallationID: rc.inst.ID, RepoID: &rc.repo.ID, Action: model.AuditFreeze, Actor: c.actor.User.Login, Reason: strings.TrimSpace(req.Reason), Scope: model.FreezeScopeRepo}})
 	return c.json(http.StatusCreated, res)
 }
 
@@ -230,7 +230,7 @@ func (s *Server) thawRepo(c *call) error {
 		}
 		return err
 	}
-	s.emit(ctx, pendingEvents{{InstallationID: rc.inst.ID, RepoID: &rc.repo.ID, Action: model.AuditThaw}})
+	s.emit(ctx, pendingEvents{{InstallationID: rc.inst.ID, RepoID: &rc.repo.ID, Action: model.AuditThaw, Actor: c.actor.User.Login, Scope: model.FreezeScopeRepo}})
 	return c.json(http.StatusOK, res)
 }
 

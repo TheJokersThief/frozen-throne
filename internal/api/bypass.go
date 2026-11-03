@@ -107,7 +107,7 @@ func (s *Server) createBypass(c *call) error {
 		}
 		return err
 	}
-	s.emit(ctx, pendingEvents{{InstallationID: rc.inst.ID, RepoID: &rc.repo.ID, PRNumber: pr, Action: model.AuditBypassCreate}})
+	s.emit(ctx, pendingEvents{{InstallationID: rc.inst.ID, RepoID: &rc.repo.ID, PRNumber: pr, Action: model.AuditBypassCreate, Actor: c.actor.User.Login, Reason: reason, Scope: model.FreezeScopeRepo}})
 	return c.json(http.StatusCreated, toBypassDTO(created, fullName(rc.repo)))
 }
 
@@ -141,6 +141,6 @@ func (s *Server) deleteBypass(c *call) error {
 		}
 		return err
 	}
-	s.emit(ctx, pendingEvents{{InstallationID: rc.inst.ID, RepoID: &rc.repo.ID, PRNumber: pr, Action: model.AuditBypassEnd}})
+	s.emit(ctx, pendingEvents{{InstallationID: rc.inst.ID, RepoID: &rc.repo.ID, PRNumber: pr, Action: model.AuditBypassEnd, Actor: c.actor.User.Login, Scope: model.FreezeScopeRepo}})
 	return c.noContent()
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/TheJokersThief/frozen-throne/internal/engine"
 	"github.com/TheJokersThief/frozen-throne/internal/model"
+	"github.com/TheJokersThief/frozen-throne/internal/slack"
 	"github.com/TheJokersThief/frozen-throne/internal/store"
 )
 
@@ -290,7 +291,55 @@ type pendingEvents []FreezeChange
 func (s *Server) emit(ctx context.Context, evs pendingEvents) {
 	for _, e := range evs {
 		s.notifier.FreezeStateChanged(ctx, e)
+		s.notifySlack(ctx, e)
 	}
+}
+
+// notifySlack maps a committed change to a Slack event. It is best-effort:
+// lookup failures are logged and skipped, and delivery is asynchronous, so
+// Slack can never delay or fail the action that caused the change.
+func (s *Server) notifySlack(ctx context.Context, e FreezeChange) {
+	if s.slack == nil {
+		return
+	}
+	var kind slack.Kind
+	switch e.Action {
+	case model.AuditFreeze:
+		kind = slack.KindFreeze
+	case model.AuditThaw:
+		kind = slack.KindThaw
+	case model.AuditBypassCreate:
+		kind = slack.KindBypass
+	case model.AuditBypassEnd:
+		kind = slack.KindBypassEnd
+	default:
+		return
+	}
+	inst, err := s.store.GetInstallation(ctx, e.InstallationID)
+	if err != nil {
+		s.log.Warn("slack event skipped: installation lookup failed", "installation", e.InstallationID, "err", err)
+		return
+	}
+	ev := slack.Event{
+		InstallationID: inst.ID, Kind: kind, Org: inst.AccountLogin, Scope: string(e.Scope),
+		Actor: e.Actor, Reason: e.Reason, PRNumber: e.PRNumber,
+		DashboardURL: s.dashboardLink("/orgs/" + inst.AccountLogin),
+	}
+	if e.RepoID != nil {
+		repo, err := s.store.GetRepo(ctx, *e.RepoID)
+		if err != nil {
+			s.log.Warn("slack event skipped: repo lookup failed", "repo_id", *e.RepoID, "err", err)
+			return
+		}
+		ev.Repo = fullName(repo)
+		ev.DashboardURL = s.dashboardLink("/repos/" + ev.Repo)
+		if ev.Scope == "" {
+			ev.Scope = string(model.FreezeScopeRepo)
+		}
+	} else if ev.Scope == "" {
+		ev.Scope = string(model.FreezeScopeOrg)
+	}
+	s.slack.Notify(ev)
 }
 
 func (s *Server) audit(ctx context.Context, st store.Store, a *Actor, e model.AuditEntry) error {

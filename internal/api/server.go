@@ -47,6 +47,12 @@ type FreezeChange struct {
 	PRNumber int
 	// Action is the audit action that caused the change.
 	Action model.AuditAction
+	// Actor is the login that made the change (empty for system changes).
+	Actor string
+	// Reason is the freeze or bypass reason, when there is one.
+	Reason string
+	// Scope is org or repo for freeze/thaw changes.
+	Scope model.FreezeScope
 }
 
 // ChangeNotifier receives "freeze state changed" events. Implementations must

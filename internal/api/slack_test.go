@@ -26,16 +26,21 @@ type fakeSlack struct {
 	mu     sync.Mutex
 	msgs   []slack.Payload
 	ch     chan struct{}
+	done   chan struct{}
+	once   sync.Once
 }
 
+// release unblocks hanging handlers.
+func (f *fakeSlack) release() { f.once.Do(func() { close(f.done) }) }
+
 func newFakeSlack(t *testing.T) *fakeSlack {
-	f := &fakeSlack{ch: make(chan struct{}, 64)}
+	f := &fakeSlack{ch: make(chan struct{}, 64), done: make(chan struct{})}
 	f.status.Store(200)
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if f.hang.Load() {
 			select {
 			case <-r.Context().Done():
-			case <-time.After(10 * time.Second):
+			case <-f.done:
 			}
 			return
 		}
@@ -49,6 +54,7 @@ func newFakeSlack(t *testing.T) *fakeSlack {
 		w.WriteHeader(int(f.status.Load()))
 	}))
 	t.Cleanup(f.srv.Close)
+	t.Cleanup(f.release)
 	return f
 }
 
