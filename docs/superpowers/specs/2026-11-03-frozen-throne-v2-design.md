@@ -124,7 +124,17 @@ dependencies have merged.
 - I. Public status endpoint and badge.
 - J. Packaging and release: Docker image, static binary with embedded web assets,
   setup/docs guide.
-- K. End-to-end test against a fake GitHub.
+- K. End-to-end scenario tests (needs everything above and L): freeze/thaw,
+  schedule windows, bypass, missed-webhook healing, driven through the real
+  binary and the mock GitHub.
+
+**Parallel track: integration harness (needs only B)**
+- L. Integration harness: docker compose environment with the app and a mock
+  GitHub (REST API for the endpoints the app uses, plus a sender that delivers
+  signed webhook events), and a library of realistic webhook fixtures
+  (pull_request opened/synchronize/reopened/closed, check_run rerequested,
+  merge_group, installation, installation_repositories) so tests behave as if
+  the events came from real GitHub. Runs in CI.
 
 ## Success
 
