@@ -3,10 +3,12 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -73,7 +75,7 @@ func startCompose(ctx context.Context) (*Stack, error) {
 	s.closers = append(s.closers, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if out, err := compose(ctx, "down", "-v", "--remove-orphans", "--timeout", "5").CombinedOutput(); err != nil {
+		if out, err := compose(ctx, "down", "-v", "--remove-orphans", "--rmi", "local", "--timeout", "5").CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "integration: compose down: %v\n%s\n", err, out)
 		}
 	})
@@ -81,11 +83,15 @@ func startCompose(ctx context.Context) (*Stack, error) {
 	fmt.Fprintf(os.Stderr, "integration: compose project %s (app :%d, mock :%d); building images, this can take a while\n", project, appPort, mockPort)
 	upCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	if out, err := compose(upCtx, "up", "-d", "--build", "--wait", "--wait-timeout", "180").CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", out)
+	// Stream progress to stderr while keeping a copy for the failure message.
+	var captured bytes.Buffer
+	up := compose(upCtx, "up", "-d", "--build", "--wait", "--wait-timeout", "180")
+	up.Stdout = io.MultiWriter(os.Stderr, &captured)
+	up.Stderr = up.Stdout
+	if err := up.Run(); err != nil {
 		s.DumpLogs(os.Stderr)
 		s.Close()
-		return nil, fmt.Errorf("integration: docker compose up: %w", err)
+		return nil, fmt.Errorf("integration: docker compose up: %w\n%s", err, tail(captured.String(), 4000))
 	}
 	return s, nil
 }
@@ -100,4 +106,12 @@ func freePort() (int, error) {
 	}
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+// tail returns at most the last n bytes of s.
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }
