@@ -77,6 +77,32 @@ func ev(k Kind) Event {
 	return Event{InstallationID: 1, Kind: k, Org: "acme", Scope: "org", Actor: "alice", Reason: "r", DashboardURL: "https://d/x"}
 }
 
+func TestNotifyDeliversAllKinds(t *testing.T) {
+	kinds := []Kind{KindFreeze, KindThaw, KindBypass, KindBypassEnd, KindWindowStart, KindWindowEnd}
+	got := make(chan Payload, len(kinds))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p Payload
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		got <- p
+	}))
+	defer srv.Close()
+	h := newHarness(t, model.SlackConfig{InstallationID: 1, WebhookURL: srv.URL, Enabled: true}, nil)
+	for _, k := range kinds {
+		e := ev(k)
+		e.PRNumber = 7
+		e.Reason = "why-" + string(k)
+		h.n.Notify(e)
+		select {
+		case p := <-got:
+			if want := Message(e); p.Text != want.Text || !strings.Contains(p.Text, "why-"+string(k)) {
+				t.Errorf("%s: got %q want %q", k, p.Text, want.Text)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s: no delivery", k)
+		}
+	}
+}
+
 func TestNotifyDelivers(t *testing.T) {
 	got := make(chan Payload, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +174,7 @@ func TestRetryThenSuccess(t *testing.T) {
 	}
 	h.smu.Lock()
 	defer h.smu.Unlock()
-	if len(h.sleep) != 2 || h.sleep[1] != time.Second {
+	if len(h.sleep) != 2 || h.sleep[0] != 500*time.Millisecond || h.sleep[1] != time.Second {
 		t.Fatalf("sleeps %v", h.sleep)
 	}
 }
@@ -185,7 +211,9 @@ func TestGivesUpAfterMaxAttempts(t *testing.T) {
 
 func TestPerAttemptTimeout(t *testing.T) {
 	release := make(chan struct{})
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
 		select {
 		case <-release:
 		case <-r.Context().Done():
@@ -206,6 +234,9 @@ func TestPerAttemptTimeout(t *testing.T) {
 	}
 	if strings.Contains(h.logs.String(), "hangsecret") {
 		t.Fatalf("logs leak url: %s", h.logs.String())
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("attempts = %d, want 2", hits.Load())
 	}
 }
 
@@ -295,5 +326,107 @@ func TestNetworkErrorDoesNotLeakURL(t *testing.T) {
 	err = h.n.SendTest(context.Background(), 1, "acme", "")
 	if err == nil || strings.Contains(err.Error(), "netsecret") {
 		t.Fatalf("SendTest err: %v", err)
+	}
+}
+
+func TestNotifyDoesNotHoldLockInOnFailure(t *testing.T) {
+	var n *Notifier
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	h := newHarness(t, model.SlackConfig{InstallationID: 1}, func(o *Options) {
+		o.Queue = 1
+		o.Workers = 1
+		o.OnFailure = func(e Event, err error) {
+			if errors.Is(err, ErrQueueFull) {
+				once.Do(func() { close(entered) })
+				<-release   // slow callback
+				n.Notify(e) // re-entrant: must not deadlock on the lock
+			}
+		}
+		// Block the lone worker so the queue stays full.
+		o.Store = &blockStore{release: release}
+	})
+	n = h.n
+	h.n.Notify(ev(KindFreeze)) // taken by worker, blocks in store
+	time.Sleep(20 * time.Millisecond)
+	h.n.Notify(ev(KindFreeze))    // fills queue
+	go h.n.Notify(ev(KindFreeze)) // dropped; OnFailure blocks
+	<-entered
+	done := make(chan struct{})
+	go func() { h.n.Close(); close(done) }() // needs the write lock
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close deadlocked while OnFailure was running")
+	}
+}
+
+type blockStore struct {
+	store.Slack
+	release chan struct{}
+}
+
+func (b *blockStore) GetSlackConfig(context.Context, int64) (model.SlackConfig, error) {
+	<-b.release
+	return model.SlackConfig{}, model.ErrNotFound
+}
+
+func TestCloseDrainsQueue(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(5 * time.Millisecond)
+		hits.Add(1)
+	}))
+	defer srv.Close()
+	h := newHarness(t, model.SlackConfig{InstallationID: 1, WebhookURL: srv.URL, Enabled: true}, func(o *Options) { o.Queue = 16 })
+	for i := 0; i < 10; i++ {
+		h.n.Notify(ev(KindFreeze))
+	}
+	h.n.Close()
+	h.n.Close()
+	if hits.Load() != 10 {
+		t.Fatalf("delivered %d of 10", hits.Load())
+	}
+	done := make(chan struct{})
+	go func() { h.n.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("workers still running")
+	}
+}
+
+func TestCloseCancelsHungSend(t *testing.T) {
+	old := closeWait
+	closeWait = 50 * time.Millisecond
+	defer func() { closeWait = old }()
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+	h := newHarness(t, model.SlackConfig{InstallationID: 1, WebhookURL: srv.URL, Enabled: true},
+		func(o *Options) { o.Timeout = time.Minute })
+	h.n.Notify(ev(KindFreeze))
+	time.Sleep(50 * time.Millisecond)
+	start := time.Now()
+	h.n.Close()
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("Close took %v", d)
+	}
+	select {
+	case err := <-h.fails:
+		if err == nil {
+			t.Fatal("nil failure")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled send not reported")
 	}
 }

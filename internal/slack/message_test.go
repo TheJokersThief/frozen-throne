@@ -19,11 +19,8 @@ func TestMaskWebhookURL(t *testing.T) {
 	if MaskWebhookURL("") != "" {
 		t.Fatal("empty should stay empty")
 	}
-	if got := MaskWebhookURL("::not a url"); got != "…rl" && !strings.HasPrefix(got, "…") {
+	if got := MaskWebhookURL("::not a url"); got != "…"+" url" {
 		t.Fatalf("unparsable: %q", got)
-	}
-	if got := MaskWebhookURL("::not a url"); strings.Contains(got, "not a") {
-		t.Fatalf("unparsable leaks: %q", got)
 	}
 }
 
@@ -108,5 +105,16 @@ func TestEventAllowed(t *testing.T) {
 	}
 	if !kindAllowed([]string{"freeze", "thaw"}, KindThaw) {
 		t.Error("thaw")
+	}
+}
+
+func TestMessageEdgeCases(t *testing.T) {
+	p := Message(Event{Kind: KindBypass, Org: "acme", Scope: "org", Actor: "a"})
+	if strings.Contains(p.Text, "#0") || strings.Contains(p.Text, "PR") {
+		t.Errorf("zero PR shown: %q", p.Text)
+	}
+	p = Message(Event{Kind: KindFreeze, Org: "acme", Scope: "org", DashboardURL: "https://d/x?a=1&b=2|3"})
+	if !strings.Contains(p.Text, "<https://d/x?a=1&amp;b=2%7C3|Open dashboard>") {
+		t.Errorf("url not escaped: %q", p.Text)
 	}
 }

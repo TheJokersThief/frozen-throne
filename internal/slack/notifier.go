@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -31,12 +30,16 @@ var (
 const (
 	maxBackoff    = 10 * time.Second
 	maxRetryAfter = 30 * time.Second
-	closeWait     = 5 * time.Second
 )
+
+// closeWait bounds how long Close waits for the queue to drain (var for tests).
+var closeWait = 5 * time.Second
 
 // Options configures a Notifier.
 type Options struct {
 	Store       store.Slack // only GetSlackConfig is used
+	// Note: the stored Channel override is ignored by modern Slack app
+	// webhooks, which post to the channel chosen at install time.
 	HTTPClient  *http.Client
 	Timeout     time.Duration // per attempt; default 5s
 	MaxAttempts int           // default 4
@@ -47,7 +50,8 @@ type Options struct {
 	// OnFailure is called after a notification is dropped or finally fails.
 	// The error never contains the webhook URL.
 	OnFailure func(Event, error)
-	// Sleep replaces the backoff wait; tests inject a fake.
+	// Sleep replaces the backoff wait. Test-only: an injected Sleep ignores
+	// context cancellation, so Close cannot interrupt it.
 	Sleep func(time.Duration)
 	// AllowAnyHost permits non-Slack hosts and plain http (tests, proxies).
 	AllowAnyHost bool
@@ -105,18 +109,27 @@ func New(o Options) *Notifier {
 // the notifier is closed) the event is dropped, logged and reported to
 // OnFailure.
 func (n *Notifier) Notify(ev Event) {
+	// Hold the lock only for the send; callbacks and logging run unlocked so
+	// a slow or re-entrant OnFailure cannot stall Close or other callers.
+	var dropErr error
 	n.mu.RLock()
-	defer n.mu.RUnlock()
 	if n.closed {
-		n.fail(ev, ErrClosed)
+		dropErr = ErrClosed
+	} else {
+		select {
+		case n.queue <- ev:
+		default:
+			dropErr = ErrQueueFull
+		}
+	}
+	n.mu.RUnlock()
+	if dropErr == nil {
 		return
 	}
-	select {
-	case n.queue <- ev:
-	default:
+	if dropErr == ErrQueueFull {
 		n.o.Logger.Warn("slack notification dropped: queue full", "kind", ev.Kind, "org", ev.Org)
-		n.fail(ev, ErrQueueFull)
 	}
+	n.fail(ev, dropErr)
 }
 
 // Close stops accepting events, lets workers drain the queue for a bounded
@@ -214,8 +227,7 @@ func (n *Notifier) deliver(ctx context.Context, webhook string, p Payload) error
 		if err == nil {
 			return nil
 		}
-		var se *statusError
-		isStatus := errors.As(err, &se)
+		se, isStatus := errors.AsType[*statusError](err)
 		if isStatus && !se.retryable() {
 			return err
 		}
@@ -249,7 +261,6 @@ func (n *Notifier) sleep(ctx context.Context, d time.Duration) {
 
 var (
 	errInvalidURL = errors.New("invalid webhook URL")
-	linkEscaper   = strings.NewReplacer("|", "%7C", ">", "%3E", "<", "%3C")
 )
 
 // attempt makes one POST with the per-attempt timeout. Returned errors never
@@ -271,8 +282,7 @@ func (n *Notifier) attempt(ctx context.Context, webhook string, p Payload) error
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := n.client.Do(req)
 	if err != nil {
-		var ue *url.Error
-		if errors.As(err, &ue) {
+		if ue, ok := errors.AsType[*url.Error](err); ok {
 			err = ue.Err // net/http embeds the full URL in url.Error
 		}
 		return fmt.Errorf("slack request failed: %w", err)

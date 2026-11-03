@@ -73,6 +73,11 @@ func kindAllowed(events []string, k Kind) bool {
 
 var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
+// linkEscaper makes a URL safe inside a Slack <url|label> link.
+var linkEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "|", "%7C")
+
+func linkURL(u string) string { return linkEscaper.Replace(u) }
+
 // esc escapes user-supplied text per Slack's mrkdwn rules.
 func esc(s string) string { return slackEscaper.Replace(s) }
 
@@ -108,9 +113,9 @@ func Message(ev Event) Payload {
 	case KindThaw:
 		head = fmt.Sprintf(":sunny: %s thawed %s", actor, target)
 	case KindBypass:
-		head = fmt.Sprintf(":unlock: %s granted a bypass for PR #%d on %s", actor, ev.PRNumber, target)
+		head = fmt.Sprintf(":unlock: %s granted a bypass%s on %s", actor, prRef(ev.PRNumber), target)
 	case KindBypassEnd:
-		head = fmt.Sprintf(":lock: bypass for PR #%d on %s ended", ev.PRNumber, target)
+		head = fmt.Sprintf(":lock: bypass%s on %s ended", prRef(ev.PRNumber), target)
 	case KindWindowStart:
 		head = fmt.Sprintf(":snowflake: freeze window started by schedule on %s%s", target, sched)
 	case KindWindowEnd:
@@ -125,7 +130,7 @@ func Message(ev Event) Payload {
 		b.WriteString("\nReason: " + esc(ev.Reason))
 	}
 	if ev.DashboardURL != "" {
-		b.WriteString("\n<" + strings.NewReplacer("|", "%7C", ">", "%3E", "<", "%3C").Replace(ev.DashboardURL) + "|Open dashboard>")
+		b.WriteString("\n<" + linkURL(ev.DashboardURL) + "|Open dashboard>")
 	}
 	return Payload{Text: b.String()}
 }
@@ -172,4 +177,11 @@ func ValidateWebhookURL(u string, allowAnyHost bool) error {
 		return nil
 	}
 	return errors.New("webhook host must be hooks.slack.com or hooks.slack-gov.com")
+}
+
+func prRef(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" for PR #%d", n)
 }
