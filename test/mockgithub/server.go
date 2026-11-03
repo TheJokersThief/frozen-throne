@@ -39,7 +39,11 @@ func New(cfg Config) *Server {
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	if strings.HasPrefix(r.URL.Path, "/_mock/") {
+		s.mux.ServeHTTP(w, r)
+		return
+	}
+	s.handle(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -125,3 +125,20 @@ func (c *Client) SeedUser(ctx context.Context, in User) (code string, err error)
 func (c *Client) SetDefaultUser(ctx context.Context, login string) error {
 	return c.call(ctx, http.MethodPut, "/_mock/default-user", map[string]string{"login": login}, nil)
 }
+
+// Calls returns the recorded REST/OAuth calls in arrival order.
+func (c *Client) Calls(ctx context.Context) ([]Call, error) {
+	var out []Call
+	err := c.call(ctx, http.MethodGet, "/_mock/calls", nil, &out)
+	return out, err
+}
+
+// ClearCalls forgets recorded calls but keeps all other state.
+func (c *Client) ClearCalls(ctx context.Context) error {
+	return c.call(ctx, http.MethodDelete, "/_mock/calls", nil, nil)
+}
+
+// AddFault makes the next f.Count requests matching f fail with f.Status.
+func (c *Client) AddFault(ctx context.Context, f Fault) error {
+	return c.call(ctx, http.MethodPost, "/_mock/faults", f, nil)
+}

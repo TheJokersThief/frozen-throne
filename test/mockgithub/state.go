@@ -23,7 +23,8 @@ type state struct {
 	userTokens    map[string]string // access token -> login
 	codes         map[string]string // oauth code -> login
 	defaultUser   string
-	calls         []Call
+	calls         []*Call
+	callSeq       int
 	faults        []*Fault
 }
 

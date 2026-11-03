@@ -14,6 +14,9 @@ func (s *Server) routesControl() {
 	s.mux.HandleFunc("GET /_mock/check-runs", s.ctlCheckRuns)
 	s.mux.HandleFunc("POST /_mock/users", s.ctlUser)
 	s.mux.HandleFunc("PUT /_mock/default-user", s.ctlDefaultUser)
+	s.mux.HandleFunc("GET /_mock/calls", s.ctlCalls)
+	s.mux.HandleFunc("DELETE /_mock/calls", s.ctlClearCalls)
+	s.mux.HandleFunc("POST /_mock/faults", s.ctlFault)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -152,4 +155,39 @@ func (s *Server) ctlDefaultUser(w http.ResponseWriter, r *http.Request) {
 	}
 	s.st.defaultUser = in.Login
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) ctlCalls(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Call, 0, len(s.st.calls))
+	for _, c := range s.st.calls {
+		out = append(out, *c)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) ctlClearCalls(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.st.calls = nil
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) ctlFault(w http.ResponseWriter, r *http.Request) {
+	var in Fault
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Status < 100 || in.Status > 599 || in.PathPrefix == "" {
+		ghError(w, http.StatusUnprocessableEntity, "status and path_prefix are required")
+		return
+	}
+	if in.Count < 1 {
+		in.Count = 1
+	}
+	s.mu.Lock()
+	s.st.faults = append(s.st.faults, &in)
+	s.mu.Unlock()
+	writeJSON(w, http.StatusCreated, in)
 }
