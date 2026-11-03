@@ -80,12 +80,15 @@ func run() error {
 		return fmt.Errorf("%s: %w", keyFile, err)
 	}
 	listen := listenAddr()
-	gh := mockgithub.New(mockgithub.Config{
+	gh, err := mockgithub.New(mockgithub.Config{
 		AppID:        appID,
 		AppPublicKey: pub,
 		ClientID:     os.Getenv("MOCK_CLIENT_ID"),
 		ClientSecret: os.Getenv("MOCK_CLIENT_SECRET"),
 	})
+	if err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

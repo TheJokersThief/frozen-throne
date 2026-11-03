@@ -3,6 +3,7 @@ package mockgithub
 import (
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -26,15 +27,19 @@ type Server struct {
 	st  *state
 }
 
-// New returns the mock as an http.Handler.
-func New(cfg Config) *Server {
+// New returns the mock as an http.Handler. It fails when cfg.AppPublicKey is
+// nil: without a key every App JWT would be rejected (or, worse, accepted).
+func New(cfg Config) (*Server, error) {
+	if cfg.AppPublicKey == nil {
+		return nil, errors.New("mockgithub: Config.AppPublicKey is required")
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	s := &Server{cfg: cfg, mux: http.NewServeMux(), st: newState()}
 	s.routesGitHub()
 	s.routesControl()
-	return s
+	return s, nil
 }
 
 // ServeHTTP implements http.Handler.

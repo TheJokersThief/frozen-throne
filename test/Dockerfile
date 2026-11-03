@@ -7,7 +7,7 @@
 # distroless. Containers run as non-root; both binaries have a -healthcheck
 # flag because the runtime image has no shell, curl or wget.
 
-FROM golang:1.26 AS build
+FROM golang:1.26.1 AS build
 WORKDIR /src
 ENV CGO_ENABLED=0
 COPY go.mod go.sum ./

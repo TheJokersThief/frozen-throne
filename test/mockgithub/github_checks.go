@@ -3,6 +3,7 @@ package mockgithub
 import (
 	"net/http"
 	"strconv"
+	"time"
 )
 
 func (s *Server) routesChecks() {
@@ -73,6 +74,13 @@ func (s *Server) createCheckRun(w http.ResponseWriter, r *http.Request) {
 	s.st.nextCheckID++
 	cr := CheckRun{ID: s.st.nextCheckID, InstallationID: instID, Owner: repo.Owner, Repo: repo.Name, Status: "queued"}
 	in.apply(&cr)
+	// GitHub: a conclusion without a status completes the run.
+	if in.Conclusion != nil && in.Status == nil {
+		cr.Status = "completed"
+	}
+	if cr.Status == "completed" && cr.CompletedAt == "" {
+		cr.CompletedAt = s.cfg.Now().UTC().Format(time.RFC3339)
+	}
 	s.st.checkRuns = append(s.st.checkRuns, cr)
 	writeJSON(w, http.StatusCreated, checkRunJSON(cr))
 }

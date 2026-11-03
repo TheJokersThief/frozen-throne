@@ -40,9 +40,13 @@ func newStack(t *testing.T) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock := httptest.NewServer(mockgithub.New(mockgithub.Config{
+	gh, err := mockgithub.New(mockgithub.Config{
 		AppID: appID, AppPublicKey: pub, ClientID: clientID, ClientSecret: clientSecret,
-	}))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := httptest.NewServer(gh)
 	t.Cleanup(mock.Close)
 
 	// The app needs its own public URL for the OAuth redirect, which is only

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/TheJokersThief/frozen-throne/internal/github"
+	"github.com/TheJokersThief/frozen-throne/test/mockgithub"
 )
 
 func TestCreateUpdateAndInspectCheckRun(t *testing.T) {
@@ -108,5 +109,35 @@ func TestWaitForCheckRun(t *testing.T) {
 	defer cancel2()
 	if _, err := h.ctl.WaitForCheckRun(short, "acme", "web", "never", nil); err == nil {
 		t.Fatal("want timeout error")
+	}
+}
+
+func TestNewRejectsNilPublicKey(t *testing.T) {
+	srv, err := mockgithub.New(mockgithub.Config{AppID: appID})
+	if err == nil || srv != nil {
+		t.Fatalf("want error and nil server, got %v, %v", srv, err)
+	}
+}
+
+func TestCheckRunWithConclusionButNoStatusIsCompleted(t *testing.T) {
+	h := newHarness(t)
+	seedRepo(t, h)
+	ctx := context.Background()
+	tok := installToken(t, h, 7)
+
+	code, body := do(t, http.MethodPost, h.srv.URL+"/repos/acme/web/check-runs", tok,
+		map[string]any{"name": "x", "head_sha": "feed", "conclusion": "success"})
+	if code != http.StatusCreated {
+		t.Fatalf("status %d: %s", code, body)
+	}
+	runs, err := h.ctl.CheckRuns(ctx, "acme", "web", "feed", "x")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs %+v, err %v", runs, err)
+	}
+	if runs[0].Status != "completed" {
+		t.Fatalf("status = %q, want completed", runs[0].Status)
+	}
+	if _, err := time.Parse(time.RFC3339, runs[0].CompletedAt); err != nil {
+		t.Fatalf("completed_at %q: %v", runs[0].CompletedAt, err)
 	}
 }

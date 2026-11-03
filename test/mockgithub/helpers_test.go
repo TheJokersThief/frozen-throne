@@ -49,12 +49,16 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	key := loadKey(t)
-	srv := httptest.NewServer(mockgithub.New(mockgithub.Config{
+	gh, err := mockgithub.New(mockgithub.Config{
 		AppID:        appID,
 		AppPublicKey: &key.PublicKey,
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
-	}))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(gh)
 	t.Cleanup(srv.Close)
 	return &harness{srv: srv, ctl: mockgithub.NewClient(srv.URL), key: key}
 }
