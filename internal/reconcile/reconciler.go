@@ -75,7 +75,10 @@ type Reconciler struct {
 	blocked  map[int64]time.Time // installation -> backoff expiry
 	attempts map[int64]int       // repo -> consecutive failed attempts
 	periodic Timer
-	stopped  bool
+	// window-boundary scheduler (see scheduler.go)
+	schedTimer Timer
+	schedNext  map[int64]time.Time // repo -> next boundary
+	stopped    bool
 
 	skipInitial bool // tests: do not enqueue All() when Run starts
 }
@@ -194,6 +197,9 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	if r.periodic != nil {
 		r.periodic.Stop()
 	}
+	if r.schedTimer != nil {
+		r.schedTimer.Stop()
+	}
 	r.mu.Unlock()
 	r.q.close()
 	<-loopDone
@@ -229,6 +235,7 @@ func (r *Reconciler) loop(ctx context.Context) {
 		r.repos, r.insts, r.all = map[int64]struct{}{}, map[int64]struct{}{}, false
 		r.mu.Unlock()
 		r.expand(ctx, repos, insts, all)
+		r.refreshSchedule(ctx)
 	}
 }
 
