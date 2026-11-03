@@ -5,6 +5,7 @@ import type { ApiErrorBody } from "./types";
 // Typed client for api/openapi.yaml (same-origin, cookie session).
 export const api = createClient<paths>({
   baseUrl: `${globalThis.location?.origin ?? ""}/api/v1`,
+  credentials: "same-origin",
   headers: { "X-Requested-With": "frozen-throne" },
   // Resolve fetch lazily so test/mocking layers that patch it later are honoured.
   fetch: (req) => globalThis.fetch(req),
