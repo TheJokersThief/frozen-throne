@@ -35,6 +35,8 @@ type Env struct {
 	Maintainer string // may freeze: maintain on the repo, org member
 	Member     string // read-only: pull on the repo, org member
 	Outsider   string // no access at all
+
+	maintainer mockgithub.User
 }
 
 func newEnv(t *testing.T, s *Stack, n int) *Env {
@@ -67,7 +69,44 @@ func newEnv(t *testing.T, s *Stack, n int) *Env {
 		_, err := s.Mock.SeedUser(ctx, u)
 		must(err)
 	}
+	e.maintainer = users[0]
 	return e
+}
+
+// AddRepo creates another repository in the env's installation in the mock and
+// gives Maintainer maintain rights on it. It sends no webhook. Returns the
+// repo id.
+func (e *Env) AddRepo(name string) int64 {
+	e.T.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id := e.RepoID + int64(len(e.maintainer.RepoPerms)) // unique: one more than the last
+	if err := e.S.Mock.SeedRepo(ctx, mockgithub.Repo{InstallationID: e.InstallationID, ID: id, Owner: e.Org, Name: name, DefaultBranch: "main"}); err != nil {
+		e.T.Fatalf("seed repo: %v", err)
+	}
+	e.maintainer.RepoPerms[e.Org+"/"+name] = "maintain"
+	if _, err := e.S.Mock.SeedUser(ctx, e.maintainer); err != nil {
+		e.T.Fatalf("grant repo: %v", err)
+	}
+	return id
+}
+
+// ListRepos returns the full names the user sees in GET /api/v1/repos.
+func (e *Env) ListRepos(sess *Session) []string {
+	e.T.Helper()
+	var out struct {
+		Items []struct {
+			FullName string `json:"full_name"`
+		} `json:"items"`
+	}
+	if st := sess.JSON(http.MethodGet, "/api/v1/repos?org="+e.Org, nil, &out); st != http.StatusOK {
+		e.T.Fatalf("list repos: status %d", st)
+	}
+	names := []string{}
+	for _, it := range out.Items {
+		names = append(names, it.FullName)
+	}
+	return names
 }
 
 // SHA returns a stable, unique-per-test 40-hex commit id for label.
