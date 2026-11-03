@@ -7,6 +7,11 @@ import { FreezeControl } from "../components/FreezeControl";
 import { ReasonChips, StatusBadge } from "../components/Status";
 
 const PAGE = 25;
+/** The API orders alphabetically; surface repos needing attention first (stable, per page). */
+export function frozenFirst<T extends { state: { frozen: boolean } }>(items: T[]): T[] {
+  return [...items].sort((a, b) => Number(b.state.frozen) - Number(a.state.frozen));
+}
+
 type StateFilter = "" | "frozen" | "thawed";
 
 export function Dashboard() {
@@ -63,7 +68,7 @@ export function Dashboard() {
         <>
           <p className="muted small" aria-live="polite">{total} {total === 1 ? "repository" : "repositories"}</p>
           <ul className="repo-list" aria-label="Repositories">
-            {repos.data!.items.map((r) => <RepoRow key={r.id} repo={r} />)}
+            {frozenFirst(repos.data!.items).map((r) => <RepoRow key={r.id} repo={r} />)}
           </ul>
           {pages > 1 && (
             <nav className="pager" aria-label="Pagination">

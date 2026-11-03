@@ -172,8 +172,8 @@ export function createHandlers(db: MockDb, opts: { latencyMs?: number } = {}): H
       if (text) list = list.filter((r) => r.full_name.toLowerCase().includes(text));
       if (org) list = list.filter((r) => r.owner.toLowerCase() === org);
       if (state) list = list.filter((r) => r.state.frozen === (state === "frozen"));
-      // Frozen repos first, then by name (the dashboard surfaces what needs attention).
-      list.sort((a, b) => Number(b.state.frozen) - Number(a.state.frozen) || a.full_name.localeCompare(b.full_name));
+      // The Go API orders by lower-cased full name only; the UI surfaces frozen repos itself.
+      list.sort((a, b) => (a.full_name.toLowerCase() < b.full_name.toLowerCase() ? -1 : 1));
       return HttpResponse.json({ items: list.slice(page.offset, page.offset + page.limit), total: list.length });
     }),
     route("get", "/repos/:owner/:repo", (c) => {
