@@ -1,8 +1,8 @@
 import type {
   AuditAction, AuditEntry, Bypass, FreezeReason, FreezeState, Org, Permissions,
-  RepoDetail, RepoSummary, Schedule, ScheduleInput, User,
+  RepoDetail, RepoSummary, Schedule, ScheduleInput, User, Weekday,
 } from "../api/types";
-import { recurringActive } from "../lib/time";
+import { isValidTimezone, recurringActive } from "../lib/time";
 
 type Role = "none" | "member" | "maintainer" | "owner";
 interface ManualFreeze { id: number; reason?: string; by: string; since: string }
@@ -17,6 +17,8 @@ export interface MockOrg {
 }
 export type MockSchedule = Schedule & { org: string };
 
+const WEEKDAY_ORDER: Weekday[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const HHMM = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
@@ -47,7 +49,7 @@ export class MockDb {
     return {
       can_freeze: org ? owner : maint,
       can_thaw: org ? owner : maint,
-      can_bypass: maint,
+      can_bypass: org ? owner : maint,
       can_manage_schedules: org ? owner : maint,
       ...(org ? { can_manage_slack: owner } : {}),
     };
@@ -58,10 +60,11 @@ export class MockDb {
     return o.role === "owner" ? "owner" : r.role;
   }
   findRepo(owner: string, name: string) {
-    return this.repos.find((r) => r.owner === owner && r.name === name && this.repoRole(r) !== "none");
+    const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+    return this.repos.find((r) => eq(r.owner, owner) && eq(r.name, name) && this.repoRole(r) !== "none");
   }
   findOrg(login: string) {
-    return this.orgs.find((o) => o.login === login);
+    return this.orgs.find((o) => o.login.toLowerCase() === login.toLowerCase());
   }
 
   // ---- state ----
@@ -77,7 +80,7 @@ export class MockDb {
     const { org: _org, ...out } = s;
     void _org;
     const res: Schedule = { ...out, active };
-    if (s.kind === "one_off") {
+    if (s.kind === "one_off" && s.enabled) {
       if (active) res.next_end = s.ends_at;
       else if (Date.parse(s.starts_at!) > this.now()) res.next_start = s.starts_at;
     }
@@ -172,36 +175,77 @@ export class MockDb {
   // ---- mutations ----
   log(action: AuditAction, org: string, extra: Partial<AuditEntry> = {}) {
     this.audit.unshift({
-      id: this.nextId(), action, org, scope: extra.repo ? "repo" : "org",
-      actor: this.user.login, created_at: this.iso(), ...extra,
+      id: this.nextId(), action, org, actor: this.user.login, created_at: this.iso(), ...extra,
     });
   }
 
   buildSchedule(
     input: ScheduleInput, scope: "org" | "repo", org: string, repo?: string, prev?: Schedule,
   ): MockSchedule {
+    // Only the fields that belong to the kind are stored, like the Go API.
+    const kindFields: Partial<ScheduleInput> =
+      input.kind === "one_off"
+        ? { starts_at: this.iso(Date.parse(input.starts_at!)), ends_at: this.iso(Date.parse(input.ends_at!)) }
+        : {
+            weekdays: WEEKDAY_ORDER.filter((d) => input.weekdays?.includes(d)),
+            start_time: input.start_time, end_time: input.end_time,
+            ...(input.valid_from ? { valid_from: input.valid_from } : {}),
+            ...(input.valid_until ? { valid_until: input.valid_until } : {}),
+          };
+    const name = input.name?.trim();
+    const reason = input.reason?.trim();
     return {
-      ...input, enabled: input.enabled ?? true, id: prev?.id ?? this.nextId(), scope, org,
+      kind: input.kind, timezone: input.timezone, ...(name ? { name } : {}), ...(reason ? { reason } : {}),
+      ...kindFields, enabled: input.enabled ?? true, id: prev?.id ?? this.nextId(), scope, org,
       ...(repo ? { repo } : {}), created_by: prev?.created_by ?? this.user.login,
       created_at: prev?.created_at ?? this.iso(), updated_at: this.iso(),
     };
   }
 
-  /** Validation mirroring the spec; returns per-field messages. */
-  validateSchedule(i: ScheduleInput): Record<string, string> {
+  /** Validation mirroring the Go API (and the spec); returns per-field messages. */
+  validateSchedule(i: Partial<ScheduleInput>): Record<string, string> {
     const f: Record<string, string> = {};
+    if ((i.name ?? "").length > 100) f.name = "must be at most 100 characters";
+    if ((i.reason ?? "").length > 500) f.reason = "must be at most 500 characters";
+    if (!i.timezone) f.timezone = "required";
+    else if (!isValidTimezone(i.timezone)) f.timezone = "unknown IANA timezone";
     if (i.kind === "one_off") {
-      if (!i.starts_at) f.starts_at = "required";
-      if (!i.ends_at) f.ends_at = "required";
-      if (i.starts_at && i.ends_at && Date.parse(i.starts_at) >= Date.parse(i.ends_at)) {
-        f.ends_at = "must be after starts_at";
+      if (!i.starts_at) f.starts_at = "required for one_off";
+      else if (!i.ends_at) f.ends_at = "required for one_off";
+      else if (Date.parse(i.starts_at) >= Date.parse(i.ends_at)) f.ends_at = "must be after starts_at";
+    } else if (i.kind === "recurring") {
+      if (!i.weekdays?.length) f.weekdays = "at least one weekday required for recurring";
+      const seen = new Set<string>();
+      for (const d of i.weekdays ?? []) {
+        if (!WEEKDAY_ORDER.includes(d as Weekday)) f.weekdays = "must be any of sun, mon, tue, wed, thu, fri, sat";
+        else if (seen.has(d)) f.weekdays = "must not contain duplicates";
+        seen.add(d);
+      }
+      if (!HHMM.test(i.start_time ?? "")) f.start_time = "required, HH:MM";
+      if (!HHMM.test(i.end_time ?? "")) f.end_time = "required, HH:MM";
+      const date = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v);
+      if (i.valid_from !== undefined && !date(i.valid_from)) f.valid_from = "must be YYYY-MM-DD";
+      if (i.valid_until !== undefined && !date(i.valid_until)) f.valid_until = "must be YYYY-MM-DD";
+      if (i.valid_from && i.valid_until && !f.valid_from && !f.valid_until && i.valid_until < i.valid_from) {
+        f.valid_until = "must not be before valid_from";
       }
     } else {
-      if (!i.weekdays?.length) f.weekdays = "pick at least one day";
-      if (!i.start_time) f.start_time = "required";
-      if (!i.end_time) f.end_time = "required";
+      f.kind = "must be one_off or recurring";
     }
     return f;
+  }
+
+  /** What the unauthenticated status endpoint reveals about an opted-in repo. */
+  publicStatus(r: MockRepo): { repo: string; frozen: boolean; since?: string; until?: string } {
+    const state = this.repoState(r);
+    const out: { repo: string; frozen: boolean; since?: string; until?: string } = {
+      repo: `${r.owner}/${r.name}`, frozen: state.frozen,
+    };
+    if (!state.frozen) return out;
+    out.since = state.reasons.map((x) => x.since).sort()[0];
+    // Only when every cause ends by itself is there a known end.
+    if (state.reasons.every((x) => x.until)) out.until = state.reasons.map((x) => x.until!).sort()[0];
+    return out;
   }
 
   seed() {
@@ -263,7 +307,8 @@ export class MockDb {
     hist.sort((a, b) => b[3] - a[3]);
     for (const [action, org, extra, ago] of hist) {
       this.audit.unshift({
-        id: this.nextId(), action, org, scope: extra.repo ? "repo" : "org",
+        id: this.nextId(), action, org,
+        ...(action === "freeze" || action === "thaw" ? { scope: extra.repo ? ("repo" as const) : ("org" as const) } : {}),
         actor: "octocat", created_at: this.iso(t - ago), ...extra,
       });
     }
