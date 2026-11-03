@@ -49,6 +49,10 @@ func TestValidateWebhookURL(t *testing.T) {
 		{"https:///x", false},
 		{"ftp://x/y", true},
 		{"https://hooks.slack.com.evil.com/x", false},
+		{"https://hooks.slack.com:8443/services/a/b/c", false},
+		{"https://hooks.slack.com/other/a/b/c", false},
+		{"https://hooks.slack.com/", false},
+		{"https://hooks.slack.com/servicesx/a", false},
 	}
 	for _, c := range bad {
 		if err := ValidateWebhookURL(c.u, c.any); err == nil {

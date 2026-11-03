@@ -174,9 +174,16 @@ func ValidateWebhookURL(u string, allowAnyHost bool) error {
 	}
 	switch strings.ToLower(p.Hostname()) {
 	case "hooks.slack.com", "hooks.slack-gov.com":
-		return nil
+	default:
+		return errors.New("webhook host must be hooks.slack.com or hooks.slack-gov.com")
 	}
-	return errors.New("webhook host must be hooks.slack.com or hooks.slack-gov.com")
+	if p.Port() != "" {
+		return errors.New("webhook URL must not specify a port")
+	}
+	if !strings.HasPrefix(p.Path, "/services/") {
+		return errors.New("webhook URL path must start with /services/")
+	}
+	return nil
 }
 
 func prRef(n int) string {
