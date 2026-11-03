@@ -1,0 +1,1121 @@
+openapi: 3.0.3
+info:
+  title: frozen-throne API
+  version: 2.0.0
+  description: |
+    REST API of frozen-throne v2, a merge-freeze tool built on a GitHub App and
+    Check Runs. The web app is served from the same origin as this API.
+
+    ## Authentication
+    Login uses GitHub OAuth through the GitHub App. A successful login sets a
+    signed, HttpOnly, `SameSite=Lax` session cookie (`ft_session`). All
+    endpoints except the `public` tag and `/healthz` require that cookie.
+    Mutating requests must send `Content-Type: application/json` (when they have
+    a body) and the header `X-Requested-With: frozen-throne`; requests missing
+    the header are rejected with 403 (CSRF defence in depth).
+
+    ## Permission model
+    Permissions follow GitHub and are checked **live** against the GitHub API
+    with a cache of about one minute, so losing access takes effect quickly.
+    Each operation lists the role it needs:
+
+    | Role | Meaning |
+    |------|---------|
+    | `public` | No login. Only opted-in repos are visible. |
+    | `member` | Logged-in user with at least read access to the repo (or membership of the org). Read-only. |
+    | `repo maintainer` | GitHub repo permission `admin` or `maintain` on the repo. Includes org owners of the repo's org. |
+    | `org owner` | GitHub org role `admin` (owner) of the installation's org. For personal-account installations, the account holder. |
+
+    A `repo maintainer` can freeze, thaw (their repo freeze), manage the repo's
+    schedules and bypass any PR in that repo. An `org owner` can additionally do
+    all of that for every repo of the org, and manage org-wide freezes, org-wide
+    schedules and Slack settings. Users only ever see repos/orgs where they
+    have at least `member` access; others return 404, not 403, to avoid
+    leaking existence.
+
+    ## Freeze semantics
+    A repo is frozen if ANY of an org freeze, a repo freeze or an active schedule
+    window applies. Thawing one does not cancel the others. Windows end on their
+    own. There is no repo-level override of an org freeze. A bypass exempts one
+    pull request (a reason is required), survives pushes and ends when the
+    freeze ends or the PR merges or closes.
+
+    ## Conventions
+    Timestamps are RFC 3339 in UTC. Errors use the `Error` schema. Freeze,
+    thaw, schedule and bypass changes are audited and trigger re-evaluation of
+    every open PR in the affected repos before the call returns (check updates
+    themselves may complete asynchronously, see `FreezeResult.rechecking`).
+  license:
+    name: See LICENSE
+    url: https://github.com/TheJokersThief/frozen-throne/blob/main/LICENSE
+servers:
+  - url: /api/v1
+    description: Same-origin API
+tags:
+  - name: auth
+    description: GitHub OAuth login and session.
+  - name: repos
+    description: Repositories and their freeze state.
+  - name: orgs
+    description: Installations (orgs/accounts) and org-wide freezes.
+  - name: schedules
+    description: Freeze windows, one-off and recurring.
+  - name: bypass
+    description: Per-pull-request bypasses.
+  - name: audit
+    description: Audit log.
+  - name: slack
+    description: Slack notification settings.
+  - name: public
+    description: Unauthenticated, opt-in per repo.
+
+security:
+  - cookieAuth: []
+
+paths:
+  /healthz:
+    get:
+      tags: [public]
+      operationId: getHealth
+      summary: Liveness probe
+      description: "**Permission:** public."
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, example: ok }
+
+  # ----------------------------------------------------------------- auth
+  /auth/login:
+    get:
+      tags: [auth]
+      operationId: login
+      summary: Start GitHub OAuth login
+      description: |
+        Redirects (302) to GitHub's authorize URL with a signed `state`.
+        **Permission:** public.
+      security: []
+      parameters:
+        - name: redirect
+          in: query
+          description: Same-origin path to return to after login. Must start with `/`; anything else is ignored.
+          schema: { type: string, example: /repos/acme/web }
+      responses:
+        '302':
+          description: Redirect to GitHub.
+          headers:
+            Location: { schema: { type: string, format: uri } }
+  /auth/callback:
+    get:
+      tags: [auth]
+      operationId: loginCallback
+      summary: GitHub OAuth callback
+      description: |
+        Validates `state`, exchanges `code`, creates the session, sets the
+        `ft_session` cookie and redirects (302) to the requested path or `/`.
+        **Permission:** public.
+      security: []
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '302':
+          description: Logged in; redirect to the app.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+            Location: { schema: { type: string } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Log out
+      description: "Destroys the session and clears the cookie. **Permission:** any logged-in user (idempotent; also succeeds without a session)."
+      security: []
+      responses:
+        '204': { description: Logged out. }
+  /auth/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: Current user
+      description: "**Permission:** member (any logged-in user)."
+      responses:
+        '200':
+          description: The logged-in user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------------------------------------------------------- repos
+  /repos:
+    get:
+      tags: [repos]
+      operationId: listRepos
+      summary: List repos with freeze state
+      description: |
+        Dashboard data: every repo the user can see (across all installations
+        of this deployment) with its current freeze state.
+        **Permission:** member. Only repos the user can access are returned.
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive substring match on `owner/name`.
+          schema: { type: string }
+        - name: org
+          in: query
+          description: Restrict to one org/account login.
+          schema: { type: string }
+        - name: state
+          in: query
+          description: Restrict by freeze state.
+          schema: { type: string, enum: [frozen, thawed] }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: A page of repos.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RepoSummary' }
+                  total:
+                    type: integer
+                    description: Total matches ignoring limit/offset.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /repos/{owner}/{repo}:
+    parameters:
+      - { $ref: '#/components/parameters/Owner' }
+      - { $ref: '#/components/parameters/Repo' }
+    get:
+      tags: [repos]
+      operationId: getRepo
+      summary: Repo detail with freeze state
+      description: |
+        Includes the reasons for the freeze, the windows that apply, active
+        bypasses and what the caller may do.
+        **Permission:** member.
+      responses:
+        '200':
+          description: Repo detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepoDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /repos/{owner}/{repo}/freeze:
+    parameters:
+      - { $ref: '#/components/parameters/Owner' }
+      - { $ref: '#/components/parameters/Repo' }
+    post:
+      tags: [repos]
+      operationId: freezeRepo
+      summary: Freeze a repo
+      description: |
+        Creates a repo freeze and re-evaluates every open PR in the repo.
+        **Permission:** repo maintainer.
+        Returns 409 if the repo already has an active repo freeze (an org freeze
+        or window does not prevent this; they are independent).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FreezeRequest' }
+      responses:
+        '201':
+          description: Frozen.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FreezeResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [repos]
+      operationId: thawRepo
+      summary: Thaw a repo's repo-level freeze
+      description: |
+        Ends the repo freeze and re-evaluates every open PR. The repo stays
+        frozen if an org freeze or an active window still applies (see the
+        returned `state`). Active bypasses are cleared only once the repo is
+        no longer frozen at all.
+        **Permission:** repo maintainer. 404 if there is no active repo freeze
+        (or the repo is not visible).
+      responses:
+        '200':
+          description: Thawed (the repo may still be frozen by another cause).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FreezeResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /repos/{owner}/{repo}/public-status:
+    parameters:
+      - { $ref: '#/components/parameters/Owner' }
+      - { $ref: '#/components/parameters/Repo' }
+    put:
+      tags: [repos, public]
+      operationId: setPublicStatus
+      summary: Opt a repo in or out of the public status endpoint and badge
+      description: |
+        Off by default. While off, the public endpoints answer 404 as if the
+        repo did not exist. **Permission:** repo maintainer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ----------------------------------------------------------------- orgs
+  /orgs:
+    get:
+      tags: [orgs]
+      operationId: listOrgs
+      summary: List orgs (installations) the user can see
+      description: "**Permission:** member. Returns installations where the user belongs to the org or has access to at least one repo."
+      responses:
+        '200':
+          description: Orgs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Org' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /orgs/{org}:
+    parameters:
+      - { $ref: '#/components/parameters/Org' }
+    get:
+      tags: [orgs]
+      operationId: getOrg
+      summary: Org detail with org-wide freeze state
+      description: "**Permission:** member."
+      responses:
+        '200':
+          description: Org.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Org' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /orgs/{org}/freeze:
+    parameters:
+      - { $ref: '#/components/parameters/Org' }
+    post:
+      tags: [orgs]
+      operationId: freezeOrg
+      summary: Freeze every repo of the org
+      description: |
+        Creates an org-wide freeze. It also covers repos added to the
+        installation later. Re-evaluates every open PR in every repo of the org.
+        **Permission:** org owner. 409 if an org freeze is already active.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FreezeRequest' }
+      responses:
+        '201':
+          description: Frozen.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgFreezeResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [orgs]
+      operationId: thawOrg
+      summary: Thaw the org-wide freeze
+      description: |
+        Ends the org freeze and re-evaluates every open PR. Repos with their own
+        freeze or an active window stay frozen.
+        **Permission:** org owner. 404 if no active org freeze.
+      responses:
+        '200':
+          description: Thawed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgFreezeResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------------ schedules
+  /orgs/{org}/schedules:
+    parameters:
+      - { $ref: '#/components/parameters/Org' }
+    get:
+      tags: [schedules]
+      operationId: listOrgSchedules
+      summary: List org-wide freeze windows
+      description: "**Permission:** member."
+      responses:
+        '200': { $ref: '#/components/responses/ScheduleList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [schedules]
+      operationId: createOrgSchedule
+      summary: Create an org-wide freeze window
+      description: "Applies to every repo of the org, including repos added later. **Permission:** org owner."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleInput' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /repos/{owner}/{repo}/schedules:
+    parameters:
+      - { $ref: '#/components/parameters/Owner' }
+      - { $ref: '#/components/parameters/Repo' }
+    get:
+      tags: [schedules]
+      operationId: listRepoSchedules
+      summary: List windows scoped to a repo
+      description: "Only windows scoped to this repo; org-wide windows are listed by `listOrgSchedules` and summarised in `getRepo`. **Permission:** member."
+      responses:
+        '200': { $ref: '#/components/responses/ScheduleList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [schedules]
+      operationId: createRepoSchedule
+      summary: Create a freeze window for a repo
+      description: "**Permission:** repo maintainer."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleInput' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /schedules/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/ScheduleId' }
+    get:
+      tags: [schedules]
+      operationId: getSchedule
+      summary: Get a window
+      description: "**Permission:** member of the window's scope."
+      responses:
+        '200':
+          description: The window.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [schedules]
+      operationId: updateSchedule
+      summary: Replace a window
+      description: |
+        Replaces all mutable fields (scope cannot change). Re-evaluates open PRs
+        of affected repos. **Permission:** repo maintainer for a repo-scoped
+        window, org owner for an org-wide window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleInput' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [schedules]
+      operationId: deleteSchedule
+      summary: Delete a window
+      description: |
+        Deleting an active window thaws it immediately (other causes may still
+        freeze the repo) and re-evaluates open PRs. **Permission:** same as
+        `updateSchedule`.
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # --------------------------------------------------------------- bypass
+  /repos/{owner}/{repo}/bypasses:
+    parameters:
+      - { $ref: '#/components/parameters/Owner' }
+      - { $ref: '#/components/parameters/Repo' }
+    get:
+      tags: [bypass]
+      operationId: listBypasses
+      summary: List bypasses in a repo
+      description: "**Permission:** member."
+      parameters:
+        - name: active
+          in: query
+          description: Only active bypasses (default true).
+          schema: { type: boolean, default: true }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Bypasses, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Bypass' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /repos/{owner}/{repo}/pulls/{number}/bypass:
+    parameters:
+      - { $ref: '#/components/parameters/Owner' }
+      - { $ref: '#/components/parameters/Repo' }
+      - { $ref: '#/components/parameters/PullNumber' }
+    post:
+      tags: [bypass]
+      operationId: createBypass
+      summary: Bypass the freeze for one pull request
+      description: |
+        Exempts this PR (not one commit) and updates its check to passing. The
+        bypass survives new pushes and ends when the repo stops being frozen or
+        the PR merges or closes. A non-blank reason is required and is recorded
+        in the audit log. Allowed even when the repo is not currently frozen
+        (it then has no effect until a freeze starts).
+        **Permission:** repo maintainer. 409 if the PR already has an active bypass.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500, description: Why this PR is exempt. }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bypass' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [bypass]
+      operationId: deleteBypass
+      summary: Remove a PR's bypass
+      description: |
+        Revokes the active bypass and re-evaluates the PR (it turns red again if
+        the repo is frozen). **Permission:** repo maintainer. 404 if none active.
+      responses:
+        '204': { description: Revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------- audit
+  /audit:
+    get:
+      tags: [audit]
+      operationId: listAudit
+      summary: List audit log entries
+      description: |
+        Who froze, thawed, scheduled or bypassed, when and why; newest first.
+        Only entries for repos/orgs the user can see are returned (org-wide
+        entries require `member` of the org).
+        **Permission:** member. Paginate with `before` = previous `next_before`.
+      parameters:
+        - name: org
+          in: query
+          description: Restrict to one org/account login.
+          schema: { type: string }
+        - name: repo
+          in: query
+          description: Restrict to one repo, `owner/name`.
+          schema: { type: string, example: acme/web }
+        - name: actor
+          in: query
+          description: GitHub login of whoever acted.
+          schema: { type: string }
+        - name: action
+          in: query
+          schema: { $ref: '#/components/schemas/AuditAction' }
+        - name: before
+          in: query
+          description: Cursor; only entries with `id` lower than this.
+          schema: { type: integer, format: int64 }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: A page of entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEntry' }
+                  next_before:
+                    type: integer
+                    format: int64
+                    description: Pass as `before` for the next page; absent on the last page.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------------------------------------------------------- slack
+  /orgs/{org}/slack:
+    parameters:
+      - { $ref: '#/components/parameters/Org' }
+    get:
+      tags: [slack]
+      operationId: getSlackSettings
+      summary: Get Slack settings
+      description: "The webhook URL is a secret and is never returned. **Permission:** org owner."
+      responses:
+        '200':
+          description: Current settings; configured is false when unset.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SlackSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [slack]
+      operationId: putSlackSettings
+      summary: Create or replace Slack settings
+      description: |
+        Omit `webhook_url` to keep the stored one. **Permission:** org owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SlackSettingsInput' }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SlackSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [slack]
+      operationId: deleteSlackSettings
+      summary: Remove Slack settings
+      description: "**Permission:** org owner."
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /orgs/{org}/slack/test:
+    parameters:
+      - { $ref: '#/components/parameters/Org' }
+    post:
+      tags: [slack]
+      operationId: testSlack
+      summary: Send a test Slack message
+      description: "**Permission:** org owner. 400 if Slack is not configured."
+      responses:
+        '204': { description: Sent. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # --------------------------------------------------------------- public
+  /public/repos/{owner}/{repo}/status:
+    parameters:
+      - { $ref: '#/components/parameters/Owner' }
+      - { $ref: '#/components/parameters/Repo' }
+    get:
+      tags: [public]
+      operationId: getPublicStatus
+      summary: Public freeze status of an opted-in repo
+      description: |
+        **Permission:** public, but only for repos that opted in (see
+        `setPublicStatus`). For any other repo, including nonexistent ones, the
+        response is an identical 404, so nothing about unlisted repos is
+        exposed. Reasons, actors and PR details are never included.
+      security: []
+      responses:
+        '200':
+          description: Status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicStatus' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /public/repos/{owner}/{repo}/badge.svg:
+    parameters:
+      - { $ref: '#/components/parameters/Owner' }
+      - { $ref: '#/components/parameters/Repo' }
+    get:
+      tags: [public]
+      operationId: getPublicBadge
+      summary: SVG status badge of an opted-in repo
+      description: |
+        Shields-style badge reading "merge freeze: frozen" or "merge freeze:
+        open". **Permission:** public, opted-in repos only. Non-opted-in or
+        unknown repos return the same generic 404 SVG ("merge freeze: unknown"),
+        so the badge reveals nothing. Served with a short `Cache-Control`
+        (max-age 60).
+      security: []
+      responses:
+        '200':
+          description: Badge.
+          headers:
+            Cache-Control: { schema: { type: string, example: 'public, max-age=60' } }
+          content:
+            image/svg+xml:
+              schema: { type: string }
+        '404':
+          description: Not opted in or unknown (generic badge).
+          content:
+            image/svg+xml:
+              schema: { type: string }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: ft_session
+      description: Signed session cookie set by `/auth/callback`.
+
+  parameters:
+    Owner:
+      name: owner
+      in: path
+      required: true
+      description: Repo owner (org or user login).
+      schema: { type: string }
+    Repo:
+      name: repo
+      in: path
+      required: true
+      description: Repo name.
+      schema: { type: string }
+    Org:
+      name: org
+      in: path
+      required: true
+      description: Org/account login of an installation.
+      schema: { type: string }
+    PullNumber:
+      name: number
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    ScheduleId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  responses:
+    BadRequest:
+      description: Malformed or invalid request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Not logged in.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Logged in and able to see the resource, but lacking the required role.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Does not exist or is not visible to the caller.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: State conflict, e.g. already frozen or already bypassed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ScheduleList:
+      description: Windows.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items:
+                type: array
+                items: { $ref: '#/components/schemas/Schedule' }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable code.
+          enum: [bad_request, unauthorized, forbidden, not_found, conflict, internal]
+        message: { type: string }
+        fields:
+          type: object
+          description: Per-field validation messages, keyed by field name.
+          additionalProperties: { type: string }
+
+    User:
+      type: object
+      required: [id, login]
+      properties:
+        id: { type: integer, format: int64, description: GitHub user id. }
+        login: { type: string }
+        name: { type: string }
+        avatar_url: { type: string, format: uri }
+
+    Permissions:
+      type: object
+      description: What the caller may do on this resource right now.
+      required: [can_freeze, can_thaw, can_bypass, can_manage_schedules]
+      properties:
+        can_freeze: { type: boolean }
+        can_thaw: { type: boolean }
+        can_bypass: { type: boolean }
+        can_manage_schedules: { type: boolean }
+        can_manage_slack:
+          type: boolean
+          description: Org only.
+
+    FreezeRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+          description: Shown on the check and in the audit log. Optional.
+
+    ReasonKind:
+      type: string
+      enum: [org_freeze, repo_freeze, schedule]
+
+    FreezeReason:
+      type: object
+      description: One cause currently freezing a repo.
+      required: [kind, since]
+      properties:
+        kind: { $ref: '#/components/schemas/ReasonKind' }
+        freeze_id: { type: integer, format: int64, description: Set for org_freeze / repo_freeze. }
+        schedule_id: { type: integer, format: int64, description: Set for schedule. }
+        text: { type: string, description: 'Reason given, or the window name.' }
+        by: { type: string, description: Login of whoever froze (manual freezes). }
+        since: { type: string, format: date-time }
+        until:
+          type: string
+          format: date-time
+          description: When it ends by itself (windows only).
+
+    FreezeState:
+      type: object
+      required: [frozen, reasons]
+      properties:
+        frozen:
+          type: boolean
+          description: True if ANY reason applies.
+        reasons:
+          type: array
+          items: { $ref: '#/components/schemas/FreezeReason' }
+        next_change:
+          type: string
+          format: date-time
+          description: Next time a schedule window starts or ends, if any.
+
+    FreezeResult:
+      type: object
+      required: [state]
+      properties:
+        state: { $ref: '#/components/schemas/FreezeState' }
+        rechecking:
+          type: integer
+          description: Number of open PRs queued for check re-evaluation.
+
+    OrgFreezeResult:
+      type: object
+      required: [org]
+      properties:
+        org: { $ref: '#/components/schemas/Org' }
+        rechecking:
+          type: integer
+          description: Number of open PRs queued across the org.
+
+    RepoSummary:
+      type: object
+      required: [id, owner, name, full_name, installation_id, state]
+      properties:
+        id: { type: integer, format: int64 }
+        owner: { type: string }
+        name: { type: string }
+        full_name: { type: string }
+        installation_id: { type: integer, format: int64 }
+        private: { type: boolean }
+        archived: { type: boolean }
+        state: { $ref: '#/components/schemas/FreezeState' }
+        open_prs:
+          type: integer
+          description: Open PRs currently tracked.
+        blocked_prs:
+          type: integer
+          description: Open PRs whose check is failing because of the freeze.
+        public_status: { type: boolean }
+        permissions: { $ref: '#/components/schemas/Permissions' }
+
+    RepoDetail:
+      allOf:
+        - $ref: '#/components/schemas/RepoSummary'
+        - type: object
+          properties:
+            default_branch: { type: string }
+            schedules:
+              type: array
+              description: All windows that can apply (repo-scoped and org-wide).
+              items: { $ref: '#/components/schemas/Schedule' }
+            bypasses:
+              type: array
+              description: Active bypasses.
+              items: { $ref: '#/components/schemas/Bypass' }
+
+    Org:
+      type: object
+      required: [installation_id, login, state]
+      properties:
+        installation_id: { type: integer, format: int64 }
+        login: { type: string }
+        type: { type: string, enum: [Organization, User] }
+        avatar_url: { type: string, format: uri }
+        repo_count: { type: integer }
+        state:
+          allOf:
+            - $ref: '#/components/schemas/FreezeState'
+          description: Org-wide freeze state only (repo freezes and windows of single repos are not included; reasons are only org_freeze / org-wide schedule).
+        permissions: { $ref: '#/components/schemas/Permissions' }
+
+    ScheduleKind:
+      type: string
+      enum: [one_off, recurring]
+
+    ScheduleInput:
+      type: object
+      required: [kind, timezone]
+      description: |
+        For `one_off`, `starts_at` and `ends_at` are required (`starts_at <
+        ends_at`; windows are half-open). For `recurring`, `weekdays`,
+        `start_time` and `end_time` are required; if `end_time <= start_time`
+        the window ends the next day. Recurring windows are evaluated in
+        `timezone` and follow DST.
+      properties:
+        name: { type: string, maxLength: 100 }
+        reason: { type: string, maxLength: 500 }
+        kind: { $ref: '#/components/schemas/ScheduleKind' }
+        timezone:
+          type: string
+          description: IANA timezone name.
+          example: Europe/Dublin
+        enabled: { type: boolean, default: true }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        weekdays:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [sun, mon, tue, wed, thu, fri, sat] }
+        start_time: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '17:00' }
+        end_time: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '09:00' }
+        valid_from: { type: string, format: date, description: First local date a window may start on. }
+        valid_until: { type: string, format: date, description: Last local date a window may start on. }
+
+    Schedule:
+      allOf:
+        - $ref: '#/components/schemas/ScheduleInput'
+        - type: object
+          required: [id, scope, enabled, created_by, created_at]
+          properties:
+            id: { type: integer, format: int64 }
+            scope:
+              type: string
+              enum: [org, repo]
+            repo: { type: string, description: 'owner/name when scope is repo.' }
+            active:
+              type: boolean
+              description: Whether the window applies right now.
+            next_start: { type: string, format: date-time }
+            next_end: { type: string, format: date-time }
+            created_by: { type: string }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    Bypass:
+      type: object
+      required: [id, repo, pr_number, reason, created_by, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        repo: { type: string, description: owner/name }
+        pr_number: { type: integer }
+        reason: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        end_reason:
+          type: string
+          enum: [revoked, thawed, merged, closed]
+
+    AuditAction:
+      type: string
+      enum:
+        - freeze
+        - thaw
+        - schedule.create
+        - schedule.update
+        - schedule.delete
+        - bypass.create
+        - bypass.end
+        - slack.update
+        - public_status.update
+
+    AuditEntry:
+      type: object
+      required: [id, action, created_at, org]
+      properties:
+        id: { type: integer, format: int64 }
+        action: { $ref: '#/components/schemas/AuditAction' }
+        org: { type: string, description: Org/account login. }
+        repo: { type: string, description: owner/name; absent for org-wide events. }
+        scope:
+          type: string
+          enum: [org, repo]
+        actor:
+          type: string
+          description: GitHub login; absent for system actions such as a window ending.
+        pr_number: { type: integer }
+        reason: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+          description: Action-specific extra data.
+        created_at: { type: string, format: date-time }
+
+    SlackEvent:
+      type: string
+      enum: [freeze, thaw, bypass, schedule]
+
+    SlackSettings:
+      type: object
+      required: [configured, enabled, events]
+      properties:
+        configured: { type: boolean, description: Whether a webhook URL is stored. }
+        enabled: { type: boolean }
+        channel: { type: string }
+        events:
+          type: array
+          description: Empty means all events.
+          items: { $ref: '#/components/schemas/SlackEvent' }
+
+    SlackSettingsInput:
+      type: object
+      required: [enabled]
+      properties:
+        webhook_url:
+          type: string
+          format: uri
+          description: Slack incoming-webhook URL (write-only secret). Omit to keep the existing one.
+        enabled: { type: boolean }
+        channel: { type: string }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/SlackEvent' }
+
+    PublicStatus:
+      type: object
+      description: Deliberately minimal; no reasons, actors or PR data.
+      required: [repo, frozen]
+      properties:
+        repo: { type: string, description: owner/name }
+        frozen: { type: boolean }
+        since: { type: string, format: date-time }
+        until:
+          type: string
+          format: date-time
+          description: Present only when the earliest end of all causes is a known window end.

@@ -1,93 +1,66 @@
-[![CircleCI](https://circleci.com/gh/TheJokersThief/frozen-throne/tree/main.svg?style=svg)](https://circleci.com/gh/TheJokersThief/frozen-throne/tree/main)
-
 # Frozen Throne (Merge Freezes)
-Frozen Throne is an API deployed to GCP Cloud Run for gating PR merges on Github.
 
-![image](https://user-images.githubusercontent.com/1175876/145129803-ce719ddc-f8ba-4c90-a5eb-90dd1d116965.png)
+Merge-freeze tooling for GitHub. A GitHub App posts a Check Run on every pull
+request: it fails while the repo (or its whole org) is frozen and passes
+otherwise. Make the check required in branch protection and no PR can merge
+while frozen. Freezes can be manual (repo or org-wide) or scheduled (one-off or
+recurring windows with a timezone), and individual PRs can be bypassed with a
+recorded reason.
 
-<!-- TOC -->
+> **Status:** v2 is a rewrite in progress. This branch contains the foundation
+> (schema, store, engine contract, OpenAPI spec, web skeleton); the server is
+> not runnable yet.
 
-- [Frozen Throne Merge Freezes](#frozen-throne-merge-freezes)
-- [API](#api)
-    - [Authentication](#authentication)
-    - [Example requests](#example-requests)
-- [Deployment](#deployment)
-    - [Pre-requisites](#pre-requisites)
-    - [Create Secrets](#create-secrets)
-    - [Deploy to Cloud Run](#deploy-to-cloud-run)
+## Layout
 
-<!-- /TOC -->
+| Path | What lives there |
+|------|------------------|
+| `cmd/frozen-throne` | Main binary. |
+| `internal/model` | Domain types shared by all packages (no dependencies). |
+| `internal/store` | Store interfaces (`store.go`), embedded SQL migrations (`migrations/`) and the SQLite implementation. |
+| `internal/engine` | Pure freeze evaluation: "is repo X frozen at T, considering bypass for PR N". Interface and types only for now. |
+| `internal/github` | GitHub App: webhooks, Check Runs (to come). |
+| `internal/api` | HTTP handlers, OAuth, permissions (to come). |
+| `api/openapi.yaml` | The REST API contract. Source of truth for handlers and the web client. |
+| `web/` | React + TypeScript (Vite) dashboard. |
+| `docs/` | Design documents. |
 
-# API
+Design rules that the schema and contracts encode: one deployment serves many
+GitHub installations; an org-wide freeze or window is stored once per
+installation and so also covers repos added later; a repo is frozen if any of
+org freeze, repo freeze or active window applies; a bypass exempts one PR and
+needs a reason.
 
-| Endpoint         | Description                    | POST data            |
-|------------------|--------------------------------|----------------------|
-| /freeze/{repo}   | Freeze the github {repo}       | `user`               |
-| /thaw/{repo}     | Thaws a repo, allowing merges  | `user`               |
-| /github-webhook  |                                | github webhook event |
+## Develop
 
-## Authentication
+Requirements: Go (see `go.mod`) and Node 22.
 
-The freeze and thaw endpoints both require authentication in the form of a header in the request.
-
-```
-X-Access-Token: WRITE_SECRET
-```
-
-## Example requests
-
-```bash
-$ curl -X POST -H "X-Access-Token: SECRET" localhost:8080/freeze/frozen-throne -d "user=thejokersthief"
-{"frozen":true}
-
-$ curl -X POST -H "X-Access-Token: SECRET" localhost:8080/thaw/frozen-throne -d "user=thejokersthief"
-{"frozen":false}
-```
-
-# Deployment
-
-## Pre-requisites
-
-* Go 1.16
-* [Have created a Github App](https://docs.github.com/en/developers/apps/building-github-apps/creating-a-github-app) and have noted the Github App ID, and [have generated a private key](https://docs.github.com/en/developers/apps/building-github-apps/authenticating-with-github-apps).
-* Have generated a secret for both your webhook verification and a write-access API key (`openssl rand -base64 48`)
-
-## Create Secrets
-The deployed cloud function uses the GCP Secret Manager to store secret values for:
-
-1. The Write Secret token
-1. The secret used to sign webhooks from Github
-1. The Github App ID
-1. The Github App's private key
-
-The first 3 of these can be created with the following command:
-
-```bash
-PROJECT_ID=<ID> \
-WRITE_SECRET=<secret> \
-WEBHOOK_SECRET=<secret> \
-GITHUB_APP_ID=<secret int> \
-    make create_secrets
+```sh
+make build        # go build into bin/
+make test         # go test ./...
+make lint         # go vet, gofmt check, OpenAPI lint, web typecheck
+make web-build    # production web build into web/dist
+make check        # everything CI runs
 ```
 
-And you can _update_ the secrets by using the same command, but replacing `create_secrets` with `update_secrets`.
+### API types
 
-The final secret is a private key associated with the Github app. This is a `.pem` file and can be added with the following command:
+`web/src/api/schema.d.ts` is generated from `api/openapi.yaml` and committed.
+After editing the spec run:
 
-```bash
-export PROJECT_ID="example"
-export PATH_TO_PEM_FILE="some/file/path"
-gcloud --project ${PROJECT_ID} secrets create FT_GITHUB_PRIVATE_KEY --replication-policy="automatic" --data-file=${PATH_TO_PEM_FILE}
+```sh
+make gen-api      # or: cd web && npm run gen:api
+make lint-api     # validate the spec (redocly)
 ```
 
-## Deploy to Cloud Run
+CI fails if the committed types are out of date.
 
-Now that you've got all your secrets set up, you are good to deploy to Cloud Run. This involves two stages:
+### Database
 
-1. Build a cloud image
-2. Deploy the image to Cloud Run
+SQLite via the pure-Go `modernc.org/sqlite` driver (no cgo, so the binary stays
+static). Migrations in `internal/store/migrations/NNNN_name.sql` are embedded and
+applied in order by `store.Open`. Add a new numbered file; never edit an applied one.
 
-```bash
-make build
-PROJECT_ID=<ID> make deploy
-```
+## License
+
+See [LICENSE](LICENSE).

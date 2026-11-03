@@ -1,8 +1,0 @@
-steps:
-  # We use kaniko as our builder to leverage caching
-- name: 'gcr.io/kaniko-project/executor:latest'
-  args:
-  # Cloud Build automatically substitutes the project ID from the project containing the Dockerfile.
-  - --destination=gcr.io/$PROJECT_ID/${_PROJECT_NAME}:${_TAG}
-  - --cache=false
-tags: ["${_PROJECT_NAME}", "${_TAG}"]

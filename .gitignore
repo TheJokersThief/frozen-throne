@@ -16,3 +16,9 @@ vendor/
 bin/
 storage/
 !frozen_throne/storage
+# frozen-throne v2
+*.db
+*.db-shm
+*.db-wal
+node_modules/
+web/dist/
