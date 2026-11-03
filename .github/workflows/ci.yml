@@ -12,17 +12,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: gofmt
-        run: test -z "$(gofmt -l .)"
-      - run: go vet ./...
-      - run: go test ./...
-      - run: go build ./...
+      - uses: extractions/setup-just@v2
+      - run: just fmt
+      - run: just vet
+      - run: just test
+      - run: just build
 
   web:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,13 +27,13 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - uses: extractions/setup-just@v2
       - name: Validate OpenAPI spec
-        run: npm run lint:api
+        run: just lint-api
       - name: Generated API types are up to date
         run: |
-          npm run gen:api
-          git diff --exit-code -- src/api/schema.d.ts
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+          just gen-api
+          git diff --exit-code -- web/src/api/schema.d.ts
+      - run: just web-typecheck
+      - run: just web-test
+      - run: just web-build

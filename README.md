@@ -34,14 +34,14 @@ needs a reason.
 
 ## Develop
 
-Requirements: Go (see `go.mod`) and Node 22.
+Requirements: Go (see `go.mod`), Node 22 and [just](https://github.com/casey/just).
 
 ```sh
-make build        # go build into bin/
-make test         # go test ./...
-make lint         # go vet, gofmt check, OpenAPI lint, web typecheck
-make web-build    # production web build into web/dist
-make check        # everything CI runs
+just build        # go build into bin/
+just test         # go test ./...
+just lint         # go vet, gofmt check, OpenAPI lint, web typecheck
+just web-build    # production web build into web/dist
+just check        # everything CI runs
 ```
 
 ### API types
@@ -50,8 +50,8 @@ make check        # everything CI runs
 After editing the spec run:
 
 ```sh
-make gen-api      # or: cd web && npm run gen:api
-make lint-api     # validate the spec (redocly)
+just gen-api      # or: cd web && npm run gen:api
+just lint-api     # validate the spec (redocly)
 ```
 
 CI fails if the committed types are out of date.
