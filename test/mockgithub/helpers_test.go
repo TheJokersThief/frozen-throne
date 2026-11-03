@@ -2,13 +2,19 @@ package mockgithub_test
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/TheJokersThief/frozen-throne/internal/github"
 	"github.com/TheJokersThief/frozen-throne/test/mockgithub"
@@ -85,4 +91,20 @@ func do(t *testing.T, method, url, bearer string, body any) (int, []byte) {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, data
+}
+
+// signJWT builds an App JWT the way GitHub documents it.
+func signJWT(t *testing.T, key *rsa.PrivateKey, iss int) string {
+	t.Helper()
+	enc := base64.RawURLEncoding
+	now := time.Now()
+	hdr, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT"})
+	claims, _ := json.Marshal(map[string]any{"iat": now.Add(-time.Minute).Unix(), "exp": now.Add(9 * time.Minute).Unix(), "iss": strconv.Itoa(iss)})
+	signing := enc.EncodeToString(hdr) + "." + enc.EncodeToString(claims)
+	sum := sha256.Sum256([]byte(signing))
+	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signing + "." + enc.EncodeToString(sig)
 }
