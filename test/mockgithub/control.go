@@ -11,6 +11,7 @@ func (s *Server) routesControl() {
 	s.mux.HandleFunc("POST /_mock/installations", s.ctlInstallation)
 	s.mux.HandleFunc("POST /_mock/repos", s.ctlRepo)
 	s.mux.HandleFunc("POST /_mock/pulls", s.ctlPull)
+	s.mux.HandleFunc("GET /_mock/check-runs", s.ctlCheckRuns)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -85,4 +86,27 @@ func (s *Server) ctlPull(w http.ResponseWriter, r *http.Request) {
 	}
 	s.st.pulls[key] = append(list, in)
 	writeJSON(w, http.StatusCreated, in)
+}
+
+func (s *Server) ctlCheckRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []CheckRun{}
+	for _, cr := range s.st.checkRuns {
+		if o := q.Get("owner"); o != "" && !strings.EqualFold(o, cr.Owner) {
+			continue
+		}
+		if n := q.Get("repo"); n != "" && !strings.EqualFold(n, cr.Repo) {
+			continue
+		}
+		if sha := q.Get("head_sha"); sha != "" && sha != cr.HeadSHA {
+			continue
+		}
+		if name := q.Get("name"); name != "" && name != cr.Name {
+			continue
+		}
+		out = append(out, cr)
+	}
+	writeJSON(w, http.StatusOK, out)
 }

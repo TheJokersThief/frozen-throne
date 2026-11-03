@@ -8,6 +8,7 @@ import (
 )
 
 func (s *Server) routesGitHub() {
+	s.routesChecks()
 	s.mux.HandleFunc("POST /app/installations/{id}/access_tokens", s.accessToken)
 	s.mux.HandleFunc("GET /repos/{owner}/{repo}/pulls", s.listPulls)
 }

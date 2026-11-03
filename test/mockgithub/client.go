@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -71,4 +72,40 @@ func (c *Client) SeedRepo(ctx context.Context, in Repo) error {
 // SeedPR registers (or replaces, by number) a pull request.
 func (c *Client) SeedPR(ctx context.Context, in PR) error {
 	return c.call(ctx, http.MethodPost, "/_mock/pulls", in, nil)
+}
+
+// CheckRuns lists recorded check runs, filtered by any non-empty argument.
+func (c *Client) CheckRuns(ctx context.Context, owner, repo, headSHA, name string) ([]CheckRun, error) {
+	v := url.Values{"owner": {owner}, "repo": {repo}, "head_sha": {headSHA}, "name": {name}}
+	for k := range v {
+		if v.Get(k) == "" {
+			v.Del(k)
+		}
+	}
+	var out []CheckRun
+	err := c.call(ctx, http.MethodGet, "/_mock/check-runs?"+v.Encode(), nil, &out)
+	return out, err
+}
+
+// WaitForCheckRun polls until a check run on headSHA satisfies pred (nil
+// accepts any) or ctx ends.
+func (c *Client) WaitForCheckRun(ctx context.Context, owner, repo, headSHA string, pred func(CheckRun) bool) (CheckRun, error) {
+	t := time.NewTicker(50 * time.Millisecond)
+	defer t.Stop()
+	for {
+		runs, err := c.CheckRuns(ctx, owner, repo, headSHA, "")
+		if err != nil {
+			return CheckRun{}, err
+		}
+		for i := len(runs) - 1; i >= 0; i-- {
+			if pred == nil || pred(runs[i]) {
+				return runs[i], nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return CheckRun{}, fmt.Errorf("mockgithub: waiting for check run on %s/%s@%s: %w", owner, repo, headSHA, ctx.Err())
+		case <-t.C:
+		}
+	}
 }
