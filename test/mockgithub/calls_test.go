@@ -188,3 +188,18 @@ func TestExpiredInstallationTokenIs401AndClientRecovers(t *testing.T) {
 		t.Fatalf("want 2 token mints (initial + refresh), got %d", tokens)
 	}
 }
+
+func TestRecordedQueryRedactsClientSecret(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	_ = h.ctl.ClearCalls(ctx)
+	do(t, http.MethodGet, h.srv.URL+"/login/oauth/authorize?state=st&client_secret="+clientSecret, "", nil)
+	calls, _ := h.ctl.Calls(ctx)
+	if len(calls) != 1 {
+		t.Fatalf("want 1 call, got %+v", calls)
+	}
+	q := calls[0].Query
+	if strings.Contains(q, clientSecret) || !strings.Contains(q, "client_secret=%5Bredacted%5D") || !strings.Contains(q, "state=st") {
+		t.Fatalf("query not redacted: %q", q)
+	}
+}

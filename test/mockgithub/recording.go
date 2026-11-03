@@ -45,7 +45,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		Seq:     s.st.callSeq,
 		Method:  r.Method,
 		Path:    r.URL.Path,
-		Query:   r.URL.RawQuery,
+		Query:   redactedQuery(r.URL.RawQuery),
 		Headers: redactedHeaders(r),
 		Body:    redactedBody(r, body),
 	}
@@ -119,4 +119,14 @@ func redactedBody(r *http.Request, body []byte) string {
 		}
 	}
 	return string(body)
+}
+
+// redactedQuery masks client_secret in a recorded query string.
+func redactedQuery(raw string) string {
+	v, err := url.ParseQuery(raw)
+	if err != nil || !v.Has("client_secret") {
+		return raw
+	}
+	v.Set("client_secret", "[redacted]")
+	return v.Encode()
 }
