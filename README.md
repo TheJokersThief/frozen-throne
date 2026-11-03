@@ -90,14 +90,14 @@ flags (pass them to `go run`; `make dev-server` passes none):
 | `-role` | `admin` | Permissions of the dev user: `admin`, `write`, `read` or `none`. |
 
 Set `FT_DEV_SESSION_SECRET` to keep sessions valid across restarts; otherwise a random
-secret is generated on each start and old cookies stop working (the UI then shows
-"Your session expired, sign in again").
+secret is generated on each start and old cookies stop working (you sign in again; a
+page that was already open shows "Your session expired, sign in again").
 
 To see permission-denied states run the server with a weaker role, for example
-`go run ./cmd/dev-server -role read`. `write` may freeze repos but not orgs; `read` sees
-everything but gets 403 on every write; `none` sees no repos (404 on direct links).
-Restart with a different `-role` while the page is open and the next action shows
-"You don't have permission to ..." without signing you out.
+`go run ./cmd/dev-server -role read`. `write` may freeze repos but not orgs; `read` gets
+403 on writes; `none` grants nothing. To see the mid-session case, keep
+`FT_DEV_SESSION_SECRET` set, restart with a weaker `-role` while the page is open and
+try a freeze: the UI shows "You don't have permission to ..." and does not sign you out.
 
 #### How the browser talks to the API
 
@@ -141,7 +141,7 @@ the spec. When the spec changes:
 
 1. Edit `api/openapi.yaml`, then `make lint-api`.
 2. Regenerate types: `make gen-api` (commit `web/src/api/schema.d.ts`).
-3. Run `npm test`; the contract test names each route or status code whose mock
+3. Run `npm test`; the contract test reports each route or status code whose mock
    (`web/src/mocks/handlers.ts`, `db.ts`) no longer matches. Fix the mock, and the Go
    handlers in `internal/api`, until it passes. Run `npm run typecheck` too: it covers
    test files.
