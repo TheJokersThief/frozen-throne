@@ -21,14 +21,10 @@
 package engine
 
 import (
-	"errors"
 	"time"
 
 	"github.com/TheJokersThief/frozen-throne/internal/model"
 )
-
-// ErrNotImplemented is returned by the stub until the engine task lands.
-var ErrNotImplemented = errors.New("engine: not implemented")
 
 // SourceKind identifies why a repo is frozen.
 type SourceKind string
@@ -105,10 +101,5 @@ type Evaluator interface {
 	Evaluate(in Input) (Decision, error)
 }
 
-// New returns the Evaluator. This is a stub: every call returns
-// ErrNotImplemented until the freeze-engine task fills it in.
-func New() Evaluator { return stub{} }
-
-type stub struct{}
-
-func (stub) Evaluate(Input) (Decision, error) { return Decision{}, ErrNotImplemented }
+// New returns the Evaluator.
+func New() Evaluator { return evaluator{} }
