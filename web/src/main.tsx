@@ -8,6 +8,7 @@ import "./styles.css";
 
 async function boot() {
   // VITE_MOCK=1 serves the OpenAPI contract from an in-browser mock (MSW).
+  // Keep this a literal comparison: Vite folds it so real builds drop the mock chunk.
   if (import.meta.env.VITE_MOCK === "1") {
     const { startMockApi } = await import("./mocks/browser");
     await startMockApi();

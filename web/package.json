@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/check-no-mock.mjs",
     "typecheck": "tsc -b --noEmit",
     "gen:api": "openapi-typescript ../api/openapi.yaml -o src/api/schema.d.ts",
     "lint:api": "redocly lint --config ../api/redocly.yaml ../api/openapi.yaml",
