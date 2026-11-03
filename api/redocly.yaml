@@ -1,0 +1,6 @@
+extends:
+  - recommended
+rules:
+  # Redirect endpoints (OAuth) have no 2xx; trivial endpoints have no 4xx.
+  operation-2xx-response: off
+  operation-4xx-response: off
