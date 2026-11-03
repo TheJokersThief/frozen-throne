@@ -19,7 +19,7 @@ func TestMaskWebhookURL(t *testing.T) {
 	if MaskWebhookURL("") != "" {
 		t.Fatal("empty should stay empty")
 	}
-	if got := MaskWebhookURL("::not a url"); got != "…"+" url" {
+	if got := MaskWebhookURL("::not a url/secret-abcd"); got != "…abcd" {
 		t.Fatalf("unparsable: %q", got)
 	}
 }

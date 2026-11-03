@@ -37,7 +37,7 @@ var closeWait = 5 * time.Second
 
 // Options configures a Notifier.
 type Options struct {
-	Store       store.Slack // only GetSlackConfig is used
+	Store store.Slack // only GetSlackConfig is used
 	// Note: the stored Channel override is ignored by modern Slack app
 	// webhooks, which post to the channel chosen at install time.
 	HTTPClient  *http.Client
