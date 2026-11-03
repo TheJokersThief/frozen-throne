@@ -18,6 +18,18 @@ jobs:
       - run: just test
       - run: just build
 
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: extractions/setup-just@v2
+      - name: Integration tests (docker compose stack with mock GitHub)
+        run: just integration-compose
+
   web:
     runs-on: ubuntu-latest
     steps:
