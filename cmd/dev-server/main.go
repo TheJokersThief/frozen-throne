@@ -7,7 +7,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -154,6 +153,22 @@ func checkBindAddr(addr string, allowRemote bool) error {
 	return fmt.Errorf("refusing to listen on non-loopback address %q: the dev server logs everyone in; pass -allow-remote to override", addr)
 }
 
+// sessionSecret returns the signing key: random when env is empty, otherwise
+// env itself, which must be at least 32 bytes.
+func sessionSecret(env string) ([]byte, error) {
+	if env == "" {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return nil, err
+		}
+		return secret, nil
+	}
+	if len(env) < 32 {
+		return nil, fmt.Errorf("FT_DEV_SESSION_SECRET must be at least 32 bytes (got %d)", len(env))
+	}
+	return []byte(env), nil
+}
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address (must be loopback unless -allow-remote)")
 	allowRemote := flag.Bool("allow-remote", false, "allow a non-loopback -addr (anyone who can reach it is logged in)")
@@ -164,14 +179,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	secret := []byte(os.Getenv("FT_DEV_SESSION_SECRET"))
-	if len(secret) == 0 {
-		secret = make([]byte, 32)
-		if _, err := rand.Read(secret); err != nil {
-			log.Fatal(err)
-		}
-	} else if len(secret) < 32 {
-		secret = bytes.Repeat(secret, 32/len(secret)+1)
+	secret, err := sessionSecret(os.Getenv("FT_DEV_SESSION_SECRET"))
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	ctx := context.Background()

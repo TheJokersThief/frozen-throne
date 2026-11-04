@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/TheJokersThief/frozen-throne/internal/store"
@@ -119,6 +120,19 @@ func TestCheckBindAddr(t *testing.T) {
 		if (err != nil) != c.wantErr {
 			t.Errorf("checkBindAddr(%q, %v) err = %v, wantErr %v", c.addr, c.allowRemote, err, c.wantErr)
 		}
+	}
+}
+
+func TestSessionSecret(t *testing.T) {
+	if _, err := sessionSecret("short"); err == nil || !strings.Contains(err.Error(), "FT_DEV_SESSION_SECRET") {
+		t.Fatalf("short secret err = %v, want error naming FT_DEV_SESSION_SECRET", err)
+	}
+	long := strings.Repeat("k", 32)
+	if got, err := sessionSecret(long); err != nil || string(got) != long {
+		t.Fatalf("32-byte secret = %q, %v", got, err)
+	}
+	if got, err := sessionSecret(""); err != nil || len(got) != 32 {
+		t.Fatalf("empty secret should generate 32 random bytes, got %d, %v", len(got), err)
 	}
 }
 

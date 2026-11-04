@@ -90,7 +90,7 @@ flags (pass them to `go run`; `make dev-server` passes none):
 | `-db` | `./dev.db` | SQLite file, seeded when empty (git-ignored). Delete it to reseed. |
 | `-role` | `admin` | Permissions of the dev user: `admin`, `write`, `read` or `none`. |
 
-Set `FT_DEV_SESSION_SECRET` to keep sessions valid across restarts; otherwise a random
+Set `FT_DEV_SESSION_SECRET` (at least 32 bytes; shorter values are rejected) to keep sessions valid across restarts; otherwise a random
 secret is generated on each start and old cookies stop working (you sign in again; a
 page that was already open shows "Your session expired, sign in again").
 
