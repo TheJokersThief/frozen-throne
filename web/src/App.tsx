@@ -1,7 +1,10 @@
+import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { ApiError, errorMessage } from "./api/client";
 import { keys, useLogout, useMe } from "./api/hooks";
+import { apiEvents, session, useSessionExpired } from "./api/session";
+import { useToast } from "./components/Toast";
 import { AuditPage } from "./pages/AuditPage";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
@@ -12,10 +15,17 @@ export function App() {
   const me = useMe();
   const qc = useQueryClient();
   const logout = useLogout();
+  const expired = useSessionExpired();
+  const toast = useToast();
+  useEffect(() => apiEvents.on((e) => {
+    if (e.type === "forbidden") toast(`You don't have permission to ${e.action}: ${e.message}`, true);
+    else toast(`Request rejected (this is a bug, please report it): ${e.message}`, true);
+  }), [toast]);
+  useEffect(() => { if (me.data) session.setExpired(false); }, [me.data]);
 
   if (me.isLoading) return <p className="empty" role="status">Loading…</p>;
   if (me.error instanceof ApiError && me.error.status === 401) {
-    return <Login onLoggedIn={() => void qc.invalidateQueries({ queryKey: keys.me })} />;
+    return <Login expired={expired} onLoggedIn={() => void qc.invalidateQueries({ queryKey: keys.me })} />;
   }
   if (me.isError) {
     return (

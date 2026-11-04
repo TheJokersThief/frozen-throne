@@ -22,6 +22,8 @@ storage/
 *.db-wal
 node_modules/
 web/dist/
+dev.db
+dev.db-*
 
 # built dashboard copied in for go:embed (just embed-web)
 internal/webui/dist/*

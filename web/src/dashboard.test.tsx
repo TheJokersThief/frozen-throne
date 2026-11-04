@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { nav } from "./config";
 import { renderApp } from "./test/utils";
 
 const row = (name: string) => screen.getByRole("link", { name }).closest("li")!;
@@ -89,14 +90,33 @@ describe("dashboard", () => {
 describe("login", () => {
   it("shows the sign-in screen when the session is missing", async () => {
     renderApp("/", { loggedIn: false });
-    const link = await screen.findByRole("link", { name: "Sign in with GitHub" });
-    expect(link).toHaveAttribute("href", expect.stringContaining("/api/v1/auth/login?redirect="));
+    expect(await screen.findByRole("button", { name: "Sign in with GitHub" })).toBeInTheDocument();
+  });
+
+  it("real mode navigates the page to the server login (redirect = window location)", async () => {
+    const to = vi.spyOn(nav, "to").mockImplementation(() => {});
+    const { user } = renderApp("/", { loggedIn: false });
+    await user.click(await screen.findByRole("button", { name: "Sign in with GitHub" }));
+    expect(to).toHaveBeenCalledWith("/api/v1/auth/login?redirect=%2F");
+    to.mockRestore();
+  });
+
+  it("mock mode keeps the mock login", async () => {
+    vi.stubEnv("VITE_MOCK", "1");
+    const to = vi.spyOn(nav, "to").mockImplementation(() => {});
+    const { user, db } = renderApp("/", { loggedIn: false });
+    await user.click(await screen.findByRole("button", { name: "Sign in (mock API)" }));
+    await screen.findByRole("link", { name: "acme/web" });
+    expect(db.loggedIn).toBe(true);
+    expect(to).not.toHaveBeenCalled();
+    to.mockRestore();
+    vi.unstubAllEnvs();
   });
 
   it("signs out", async () => {
     const { user } = renderApp();
     await screen.findByRole("link", { name: "acme/web" });
     await user.click(screen.getByRole("button", { name: "Sign out" }));
-    expect(await screen.findByRole("link", { name: "Sign in with GitHub" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Sign in with GitHub" })).toBeInTheDocument();
   });
 });

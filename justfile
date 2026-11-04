@@ -85,3 +85,7 @@ integration-compose:
 
 # Everything CI runs
 check: lint test web-test build web-build
+
+# Run the API with fake GitHub login + seeded data on 127.0.0.1:8080 (DEV ONLY)
+dev-server *args:
+    {{go}} run ./cmd/dev-server {{args}}

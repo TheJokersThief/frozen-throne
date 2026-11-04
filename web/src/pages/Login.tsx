@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 import { errorMessage } from "../api/client";
+import { isMock, loginUrl, nav } from "../config";
 
-export const IS_MOCK = import.meta.env.VITE_MOCK === "1";
-
-export function Login({ onLoggedIn }: { onLoggedIn?: () => void }) {
+export function Login({ onLoggedIn, expired }: { onLoggedIn?: () => void; expired?: boolean }) {
+  const loc = useLocation();
   const [err, setErr] = useState("");
-  const redirect = encodeURIComponent(location.pathname + location.search);
+  const mock = isMock();
   const mockLogin = async () => {
     try {
       const r = await fetch("/api/v1/auth/mock-login", { method: "POST", headers: { "X-Requested-With": "frozen-throne" } });
@@ -13,17 +14,18 @@ export function Login({ onLoggedIn }: { onLoggedIn?: () => void }) {
       onLoggedIn?.();
     } catch (e) { setErr(errorMessage(e)); }
   };
+  // Real mode: full-page navigation so the server can set cookies and redirect through GitHub.
+  const signIn = () => nav.to(loginUrl(loc.pathname + loc.search));
   return (
     <main className="login">
       <div className="flake" aria-hidden="true">❄</div>
       <h1>frozen-throne</h1>
+      {expired && <p className="notice error" role="alert">Your session expired, sign in again</p>}
       <p className="muted">Merge freezes for GitHub. Sign in to see and control your repositories.</p>
-      {IS_MOCK ? (
+      {mock ? (
         <button className="btn primary big" onClick={mockLogin}>Sign in (mock API)</button>
       ) : (
-        <a className="btn primary big" style={{ display: "inline-block", textDecoration: "none" }} href={`/api/v1/auth/login?redirect=${redirect}`}>
-          Sign in with GitHub
-        </a>
+        <button className="btn primary big" onClick={signIn}>Sign in with GitHub</button>
       )}
       {err && <p className="error" role="alert">{err}</p>}
     </main>

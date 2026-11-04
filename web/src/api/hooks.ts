@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { api, unwrap } from "./client";
+import { ApiError, api, unwrap } from "./client";
 import type { AuditAction, ScheduleInput } from "./types";
 
 export const keys = {
@@ -29,8 +29,13 @@ export function useMe() {
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: ["logout"],
     mutationFn: async () => unwrap(await api.POST("/auth/logout")),
     onSuccess: () => qc.clear(),
+    // 401/403 mean there is no session to end: the user is effectively signed out already.
+    onError: (e) => {
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) qc.clear();
+    },
   });
 }
 
@@ -136,6 +141,7 @@ function useInvalidateAll() {
 export function useFreezeRepo() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: (v: { owner: string; repo: string }) => `freeze ${v.owner}/${v.repo}` },
     mutationFn: async (v: { owner: string; repo: string; reason?: string }) =>
       unwrap(
         await api.POST("/repos/{owner}/{repo}/freeze", {
@@ -150,6 +156,7 @@ export function useFreezeRepo() {
 export function useThawRepo() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: (v: { owner: string; repo: string }) => `thaw ${v.owner}/${v.repo}` },
     mutationFn: async (v: { owner: string; repo: string }) =>
       unwrap(await api.DELETE("/repos/{owner}/{repo}/freeze", { params: { path: v } })),
     onSuccess: done,
@@ -159,6 +166,7 @@ export function useThawRepo() {
 export function useFreezeOrg() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: (v: { org: string }) => `freeze ${v.org}` },
     mutationFn: async (v: { org: string; reason?: string }) =>
       unwrap(
         await api.POST("/orgs/{org}/freeze", {
@@ -173,6 +181,7 @@ export function useFreezeOrg() {
 export function useThawOrg() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: (v: { org: string }) => `thaw ${v.org}` },
     mutationFn: async (v: { org: string }) =>
       unwrap(await api.DELETE("/orgs/{org}/freeze", { params: { path: v } })),
     onSuccess: done,
@@ -182,6 +191,7 @@ export function useThawOrg() {
 export function useSetPublicStatus() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: (v: { owner: string; repo: string }) => `change the public status of ${v.owner}/${v.repo}` },
     mutationFn: async (v: { owner: string; repo: string; enabled: boolean }) =>
       unwrap(
         await api.PUT("/repos/{owner}/{repo}/public-status", {
@@ -198,6 +208,7 @@ export type ScheduleTarget = { org: string } | { owner: string; repo: string };
 export function useCreateSchedule() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: () => "create a freeze window" },
     mutationFn: async (v: { target: ScheduleTarget; input: ScheduleInput }) =>
       "org" in v.target
         ? unwrap(
@@ -219,6 +230,7 @@ export function useCreateSchedule() {
 export function useUpdateSchedule() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: () => "update this freeze window" },
     mutationFn: async (v: { id: number; input: ScheduleInput }) =>
       unwrap(
         await api.PUT("/schedules/{id}", { params: { path: { id: v.id } }, body: v.input }),
@@ -230,6 +242,7 @@ export function useUpdateSchedule() {
 export function useDeleteSchedule() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: () => "delete this freeze window" },
     mutationFn: async (v: { id: number }) =>
       unwrap(await api.DELETE("/schedules/{id}", { params: { path: v } })),
     onSuccess: done,
@@ -239,6 +252,7 @@ export function useDeleteSchedule() {
 export function useCreateBypass() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: (v: { owner: string; repo: string; number: number }) => `bypass PR #${v.number} in ${v.owner}/${v.repo}` },
     mutationFn: async (v: { owner: string; repo: string; number: number; reason: string }) =>
       unwrap(
         await api.POST("/repos/{owner}/{repo}/pulls/{number}/bypass", {
@@ -253,6 +267,7 @@ export function useCreateBypass() {
 export function useDeleteBypass() {
   const done = useInvalidateAll();
   return useMutation({
+    meta: { action: (v: { owner: string; repo: string; number: number }) => `revoke the bypass for PR #${v.number} in ${v.owner}/${v.repo}` },
     mutationFn: async (v: { owner: string; repo: string; number: number }) =>
       unwrap(await api.DELETE("/repos/{owner}/{repo}/pulls/{number}/bypass", { params: { path: v } })),
     onSuccess: done,

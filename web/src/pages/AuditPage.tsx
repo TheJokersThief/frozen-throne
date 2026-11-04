@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { errorMessage } from "../api/client";
 import { useAudit, useOrgs } from "../api/hooks";
+import { ErrorNotice } from "../components/ErrorNotice";
 import type { AuditAction, AuditEntry } from "../api/types";
 import { formatDateTime } from "../lib/time";
 
@@ -66,7 +66,7 @@ export function AuditPage() {
         <button className="btn sm" type="submit">Filter</button>
         {repo && <span className="chip">{repo} <button type="button" className="btn link" aria-label="Clear repo filter" onClick={() => set("repo", "")}>×</button></span>}
       </form>
-      {q.isError ? <p className="notice error" role="alert">{errorMessage(q.error)}</p>
+      {q.isError ? <ErrorNotice error={q.error} what="the audit log" onRetry={() => void q.refetch()} />
         : q.isLoading ? <p className="empty" role="status">Loading…</p>
         : (
           <div className="card">
