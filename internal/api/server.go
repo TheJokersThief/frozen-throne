@@ -22,6 +22,7 @@ import (
 
 	"github.com/TheJokersThief/frozen-throne/internal/engine"
 	"github.com/TheJokersThief/frozen-throne/internal/model"
+	"github.com/TheJokersThief/frozen-throne/internal/slack"
 	"github.com/TheJokersThief/frozen-throne/internal/store"
 )
 
@@ -46,6 +47,12 @@ type FreezeChange struct {
 	PRNumber int
 	// Action is the audit action that caused the change.
 	Action model.AuditAction
+	// Actor is the login that made the change (empty for system changes).
+	Actor string
+	// Reason is the freeze or bypass reason, when there is one.
+	Reason string
+	// Scope is org or repo for freeze/thaw changes.
+	Scope model.FreezeScope
 }
 
 // ChangeNotifier receives "freeze state changed" events. Implementations must
@@ -59,6 +66,12 @@ type NopNotifier struct{}
 
 // FreezeStateChanged implements ChangeNotifier.
 func (NopNotifier) FreezeStateChanged(context.Context, FreezeChange) {}
+
+// SlackSender delivers Slack notifications. *slack.Notifier implements it.
+type SlackSender interface {
+	Notify(ev slack.Event)
+	SendTest(ctx context.Context, installationID int64, org, dashboardURL string) error
+}
 
 // Config holds static settings.
 type Config struct {
@@ -76,6 +89,12 @@ type Config struct {
 	Now func() time.Time
 	// Logger receives server-side errors (default slog.Default()).
 	Logger *slog.Logger
+	// DashboardURL is the public base URL of the web UI, used for links in
+	// Slack messages (no trailing slash). Empty omits the links.
+	DashboardURL string
+	// SlackAllowAnyHost lets webhook URLs point anywhere, including plain
+	// http (tests and local development only).
+	SlackAllowAnyHost bool
 }
 
 // Deps are the collaborators of the server.
@@ -85,6 +104,7 @@ type Deps struct {
 	OAuth       OAuthProvider
 	Permissions PermissionChecker
 	Notifier    ChangeNotifier // optional
+	Slack       SlackSender    // optional; nil disables Slack notifications
 }
 
 // Server is the HTTP API.
@@ -95,6 +115,7 @@ type Server struct {
 	oauth    OAuthProvider
 	perms    PermissionChecker
 	notifier ChangeNotifier
+	slack    SlackSender
 	sess     *sessionCodec
 	log      *slog.Logger
 	mux      *http.ServeMux
@@ -124,6 +145,7 @@ func New(cfg Config, d Deps) (*Server, error) {
 		oauth:    d.OAuth,
 		perms:    d.Permissions,
 		notifier: d.Notifier,
+		slack:    d.Slack,
 		sess:     newSessionCodec(cfg.SessionSecret),
 		log:      cfg.Logger,
 		mux:      http.NewServeMux(),
@@ -256,15 +278,11 @@ func (s *Server) routes() {
 
 	s.handle("GET /audit", true, s.listAudit)
 
-	// Slack settings depend on the notifications task; stubbed.
-	for _, p := range []string{"GET /orgs/{org}/slack", "PUT /orgs/{org}/slack", "DELETE /orgs/{org}/slack", "POST /orgs/{org}/slack/test"} {
-		s.handle(p, true, notImplemented)
-	}
+	s.handle("GET /orgs/{org}/slack", true, s.getSlack)
+	s.handle("PUT /orgs/{org}/slack", true, s.putSlack)
+	s.handle("DELETE /orgs/{org}/slack", true, s.deleteSlack)
+	s.handle("POST /orgs/{org}/slack/test", true, s.testSlack)
 
 	s.handle("GET /public/repos/{owner}/{repo}/status", false, s.getPublicStatus)
 	s.handle("GET /public/repos/{owner}/{repo}/badge.svg", false, s.getPublicBadge)
-}
-
-func notImplemented(*call) error {
-	return &apiError{Status: http.StatusNotImplemented, Code: "internal", Message: "not implemented"}
 }

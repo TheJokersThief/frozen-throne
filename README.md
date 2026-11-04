@@ -7,10 +7,21 @@ while frozen. Freezes can be manual (repo or org-wide) or scheduled (one-off or
 recurring windows with a timezone), and individual PRs can be bypassed with a
 recorded reason.
 
-> **Status:** v2 is a rewrite in progress. The production binary is not wired
-> up yet, but the real HTTP API (`internal/api`) runs today through a dev-only
-> server with a fake GitHub login, so the web dashboard works end to end locally
-> (see [Web dashboard](#web-dashboard)).
+## Self-hosting
+
+One container (or one static binary with the dashboard embedded), one SQLite
+file. Follow the [setup guide](docs/setup.md): create the GitHub App, set the
+[environment variables](docs/configuration.md), install the App, and require
+the `frozen-throne` check in branch protection.
+
+```sh
+cp docker-compose.example.yml docker-compose.yml && cp .env.example .env
+# edit .env, add the App private key, then:
+docker compose up -d
+```
+
+Images: `ghcr.io/thejokersthief/frozen-throne`. Binaries for linux/darwin
+(amd64, arm64) are attached to each GitHub release.
 
 ## Layout
 
@@ -19,14 +30,16 @@ recorded reason.
 | `cmd/frozen-throne` | Main binary. |
 | `internal/model` | Domain types shared by all packages (no dependencies). |
 | `internal/store` | Store interfaces (`store.go`), embedded SQL migrations (`migrations/`) and the SQLite implementation. |
-| `internal/engine` | Pure freeze evaluation: "is repo X frozen at T, considering bypass for PR N". Interface and types only for now. |
-| `internal/github` | GitHub App: webhooks, Check Runs (to come). |
+| `internal/engine` | Pure freeze evaluation: "is repo X frozen at T, considering bypass for PR N". Evaluates freeze state from org/repo freezes, windows and bypasses. |
+| `internal/github` | GitHub App: webhooks, Check Runs. |
 | `internal/reconcile` | Keeps Check Runs correct: triggers, window-boundary timers and a periodic pass feed a fair, bounded work queue with rate-limit backoff. |
-| `internal/api` | HTTP handlers, sessions, OAuth, permissions. |
-| `cmd/dev-server` | Dev-only API server: real handlers, fake GitHub login, seeded data. |
+| `internal/api` | HTTP handlers, OAuth, permissions, audit. |
+| `cmd/dev-server` | Dev-only API server: real handlers, fake GitHub login, seeded data (see [Web dashboard](#web-dashboard)). |
 | `api/openapi.yaml` | The REST API contract. Source of truth for handlers and the web client. |
 | `web/` | React + TypeScript (Vite) dashboard. |
-| `docs/` | Design documents. |
+| `internal/config` | Environment-variable configuration. |
+| `internal/webui` | Embeds the built dashboard (`web/dist`) and serves it with SPA fallback. |
+| `docs/` | Setup guide and configuration reference. |
 
 Design rules that the schema and contracts encode: one deployment serves many
 GitHub installations; an org-wide freeze or window is stored once per
@@ -43,6 +56,9 @@ just build        # go build into bin/
 just test         # go test ./...
 just lint         # go vet, gofmt check, OpenAPI lint, web typecheck
 just web-build    # production web build into web/dist
+just embed-web    # web-build, then copy into the Go embed dir (go build then yields a full binary)
+just release-build  # static binaries for linux/darwin amd64+arm64 into dist/
+just image        # docker build
 just check        # everything CI runs
 ```
 

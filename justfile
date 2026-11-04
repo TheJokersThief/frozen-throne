@@ -47,6 +47,34 @@ gen-api: web-install
 lint-api: web-install
     cd web && npm run lint:api
 
+# Copy the production web build into the Go embed directory
+embed-web: web-build
+    rm -rf internal/webui/dist
+    mkdir -p internal/webui/dist
+    cp -R web/dist/. internal/webui/dist/
+    touch internal/webui/dist/.gitkeep
+
+version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
+ldflags := "-s -w -X main.version=" + version
+
+# Static (CGO off) binaries with the dashboard embedded, for linux/darwin amd64+arm64, into dist/
+release-build: embed-web
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf dist && mkdir -p dist
+    for os in linux darwin; do
+      for arch in amd64 arm64; do
+        echo "building $os/$arch"
+        CGO_ENABLED=0 GOOS=$os GOARCH=$arch {{go}} build -trimpath -ldflags '{{ldflags}}' \
+          -o dist/frozen-throne-$os-$arch ./cmd/frozen-throne
+      done
+    done
+    (cd dist && shasum -a 256 frozen-throne-* > checksums.txt)
+
+# Build the Docker image (tag defaults to frozen-throne:dev)
+image tag="frozen-throne:dev":
+    docker build --build-arg VERSION={{version}} -t {{tag}} .
+
 # Everything CI runs
 check: lint test web-test build web-build
 

@@ -1,0 +1,24 @@
+# Copy to docker-compose.yml, copy .env.example to .env, fill both in.
+# See docs/setup.md.
+services:
+  frozen-throne:
+    image: ghcr.io/thejokersthief/frozen-throne:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080" # put a TLS-terminating reverse proxy in front
+    env_file: .env
+    environment:
+      FT_DB_PATH: /data/frozen-throne.db
+      # Private key as a file (preferred over putting the PEM in .env):
+      FT_GITHUB_PRIVATE_KEY_FILE: /run/secrets/github_app_key
+    secrets:
+      - github_app_key
+    volumes:
+      - frozen-throne-data:/data
+
+secrets:
+  github_app_key:
+    file: ./github-app.private-key.pem
+
+volumes:
+  frozen-throne-data:

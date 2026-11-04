@@ -1088,6 +1088,10 @@ components:
         configured: { type: boolean, description: Whether a webhook URL is stored. }
         enabled: { type: boolean }
         channel: { type: string }
+        webhook_url_masked:
+          type: string
+          readOnly: true
+          description: Log-safe form of the stored webhook URL (host and last four characters). Omitted when not configured.
         events:
           type: array
           description: Empty means all events.
