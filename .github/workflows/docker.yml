@@ -11,6 +11,22 @@ on:
       - web/package.json
       - web/package-lock.json
       - .github/workflows/docker.yml
+  # Conflicting PRs get no pull_request run; see docs/ci.md.
+  push:
+    branches:
+      - "board/**"
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - go.mod
+      - go.sum
+      - web/package.json
+      - web/package-lock.json
+      - .github/workflows/docker.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
