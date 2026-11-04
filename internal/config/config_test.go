@@ -138,3 +138,28 @@ func TestBaseURLWithPathRejected(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestEndpointOverrides(t *testing.T) {
+	c, err := Load(env(valid()), readNone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.GitHubAPIURL != "" || c.GitHubWebURL != "" || c.SlackAllowAnyHost {
+		t.Errorf("overrides must default to off: %+v", c)
+	}
+	m := valid()
+	m["FT_GITHUB_API_URL"] = "http://mock:8080/"
+	m["FT_GITHUB_WEB_URL"] = "http://mock:8080"
+	m["FT_SLACK_ALLOW_ANY_HOST"] = "true"
+	c, err = Load(env(m), readNone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.GitHubAPIURL != "http://mock:8080" || c.GitHubWebURL != "http://mock:8080" || !c.SlackAllowAnyHost {
+		t.Errorf("overrides: %+v", c)
+	}
+	m["FT_GITHUB_API_URL"] = "not a url"
+	if _, err := Load(env(m), readNone); err == nil || !strings.Contains(err.Error(), "FT_GITHUB_API_URL") {
+		t.Errorf("bad API URL error = %v", err)
+	}
+}

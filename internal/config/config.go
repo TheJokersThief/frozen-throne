@@ -20,6 +20,14 @@ type Config struct {
 	ReconcileInterval time.Duration
 	SecureCookies     bool
 
+	// GitHubAPIURL and GitHubWebURL point at GitHub Enterprise Server (or a
+	// test double). Empty means github.com / api.github.com.
+	GitHubAPIURL string
+	GitHubWebURL string
+	// SlackAllowAnyHost lets Slack webhook URLs use any host and plain http.
+	// For tests and local trials only: it disables the Slack host allowlist.
+	SlackAllowAnyHost bool
+
 	AppID         int64
 	PrivateKeyPEM []byte
 	WebhookSecret []byte
@@ -72,6 +80,27 @@ func Load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 	} else {
 		c.BaseURL = base
 		c.SecureCookies = u.Scheme == "https"
+	}
+
+	endpoint := func(name string) string {
+		v := strings.TrimRight(getenv(name), "/")
+		if v == "" {
+			return ""
+		}
+		if u, err := url.Parse(v); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			bad("%s must be an absolute http(s) URL, got %q", name, v)
+			return ""
+		}
+		return v
+	}
+	c.GitHubAPIURL = endpoint("FT_GITHUB_API_URL")
+	c.GitHubWebURL = endpoint("FT_GITHUB_WEB_URL")
+	if v := getenv("FT_SLACK_ALLOW_ANY_HOST"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			bad("FT_SLACK_ALLOW_ANY_HOST: %v", err)
+		}
+		c.SlackAllowAnyHost = b
 	}
 
 	c.ReconcileInterval = 5 * time.Minute

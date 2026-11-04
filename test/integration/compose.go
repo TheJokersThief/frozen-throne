@@ -62,6 +62,7 @@ func startCompose(ctx context.Context) (*Stack, error) {
 		MockURL:       "http://127.0.0.1:" + strconv.Itoa(mockPort),
 	}
 	s.HostRewrites = map[string]string{ComposeMockWeb: s.MockURL}
+	s.MockInternalURL = "http://" + ComposeMockWeb
 	s.dumpLogs = func(w *os.File) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
