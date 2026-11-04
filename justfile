@@ -88,6 +88,10 @@ integration:
 integration-compose:
     INTEGRATION_MODE=compose {{go}} test -tags integration -race -count=1 -timeout 20m ./test/integration/...
 
+# Regenerate docs/images/*.png from the real dashboard in mock-API mode (needs Chromium; first run: cd web && npx playwright install chromium)
+screenshots: web-install
+    cd web && npm run screenshots
+
 # Everything CI runs
 check: lint test web-test build web-build
 

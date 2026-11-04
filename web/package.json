@@ -12,7 +12,8 @@
     "dev:mock": "VITE_MOCK=1 vite",
     "build:mock": "tsc -b && VITE_MOCK=1 vite build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.105.3",
@@ -34,6 +35,8 @@
     "jsdom": "^29.1.1",
     "msw": "^3.0.3",
     "openapi-typescript": "^7.13.0",
+    "playwright": "^1.64.1",
+    "sharp": "^0.35.5",
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
     "vitest": "^5.1.0",
