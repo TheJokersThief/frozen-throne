@@ -3,27 +3,32 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 
-	"github.com/TheJokersThief/frozen-throne/test/app"
 	"github.com/TheJokersThief/frozen-throne/test/mockgithub"
 )
 
-// startInProcess runs the mock and the app on httptest servers in this
-// process. The wiring and env semantics mirror docker-compose.yml: the app is
-// given the mock's URL for both REST and OAuth web, and its own listener URL as
-// FT_PUBLIC_URL, so OAuth redirects need no rewriting.
+// startInProcess runs the mock on an httptest server in this process and the
+// real cmd/frozen-throne binary (built with the Go toolchain) as a child
+// process, configured exactly like the compose app service. "In process" thus
+// only means "no Docker": the app is the same binary the image ships.
 func startInProcess() (*Stack, error) {
 	root, err := repoRoot()
 	if err != nil {
 		return nil, err
 	}
-	keyPEM, err := os.ReadFile(filepath.Join(root, "test", "testdata", "app-key.pem"))
+	keyPath := filepath.Join(root, "test", "testdata", "app-key.pem")
+	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
 		return nil, err
 	}
@@ -42,18 +47,6 @@ func startInProcess() (*Stack, error) {
 	mock := httptest.NewServer(gh)
 	s.closers = append(s.closers, mock.Close)
 
-	// The app's public URL is its own listener, which only exists once started:
-	// start first, install the handler afterwards.
-	var h http.Handler
-	appSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h == nil {
-			http.Error(w, "starting", http.StatusServiceUnavailable)
-			return
-		}
-		h.ServeHTTP(w, r)
-	}))
-	s.closers = append(s.closers, appSrv.Close)
-
 	dir, err := os.MkdirTemp("", "ft-it-*")
 	if err != nil {
 		s.Close()
@@ -61,19 +54,78 @@ func startInProcess() (*Stack, error) {
 	}
 	s.closers = append(s.closers, func() { _ = os.RemoveAll(dir) })
 
-	handler, closer, err := app.New(app.Config{
-		DBPath:       filepath.Join(dir, "frozen-throne.db"),
-		GitHubAPIURL: mock.URL, GitHubWebURL: mock.URL,
-		AppID: AppID, PrivateKeyPEM: keyPEM, WebhookSecret: WebhookSecret,
-		OAuthClientID: OAuthClientID, OAuthClientSecret: OAuthSecret,
-		PublicURL: appSrv.URL, SessionSecret: SessionSecret,
-	})
+	bin := filepath.Join(dir, "frozen-throne")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/frozen-throne")
+	build.Dir = root
+	if out, err := build.CombinedOutput(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("integration: build cmd/frozen-throne: %w\n%s", err, out)
+	}
+
+	port, err := freePort()
 	if err != nil {
 		s.Close()
-		return nil, fmt.Errorf("integration: build app: %w", err)
+		return nil, err
 	}
-	s.closers = append(s.closers, func() { _ = closer.Close() })
-	h = handler
-	s.AppURL, s.MockURL = strings.TrimRight(appSrv.URL, "/"), strings.TrimRight(mock.URL, "/")
+	appURL := "http://127.0.0.1:" + strconv.Itoa(port)
+	logs := &syncBuffer{}
+	cmd := exec.Command(bin)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"FT_LISTEN_ADDR=127.0.0.1:"+strconv.Itoa(port),
+		"FT_DB_PATH="+filepath.Join(dir, "frozen-throne.db"),
+		"FT_GITHUB_API_URL="+mock.URL,
+		"FT_GITHUB_WEB_URL="+mock.URL,
+		"FT_GITHUB_APP_ID="+strconv.FormatInt(AppID, 10),
+		"FT_GITHUB_PRIVATE_KEY_FILE="+keyPath,
+		"FT_GITHUB_WEBHOOK_SECRET="+WebhookSecret,
+		"FT_GITHUB_CLIENT_ID="+OAuthClientID,
+		"FT_GITHUB_CLIENT_SECRET="+OAuthSecret,
+		"FT_BASE_URL="+appURL,
+		"FT_SESSION_SECRET="+SessionSecret,
+		"FT_RECONCILE_INTERVAL="+ReconcileInterval,
+		"FT_SLACK_ALLOW_ANY_HOST=true",
+	)
+	cmd.Stdout, cmd.Stderr = logs, logs
+	if err := cmd.Start(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("integration: start app: %w", err)
+	}
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+	s.closers = append(s.closers, func() {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-exited:
+		case <-time.After(20 * time.Second):
+			_ = cmd.Process.Kill()
+			<-exited
+		}
+	})
+	s.dumpLogs = func(w *os.File) {
+		fmt.Fprintln(w, "---- app process output ----")
+		_, _ = w.WriteString(logs.String())
+		fmt.Fprintln(w, "---- end app output ----")
+	}
+	s.AppURL, s.MockURL = appURL, strings.TrimRight(mock.URL, "/")
+	s.MockInternalURL = s.MockURL
 	return s, nil
+}
+
+// syncBuffer is a bytes.Buffer safe for the child's two output streams.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

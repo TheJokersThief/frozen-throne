@@ -26,6 +26,7 @@ type state struct {
 	calls         []*Call
 	callSeq       int
 	faults        []*Fault
+	slack         []SlackPost
 }
 
 func newState() *state {

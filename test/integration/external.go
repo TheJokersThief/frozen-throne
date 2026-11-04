@@ -31,8 +31,10 @@ func startExternal() (*Stack, error) {
 		secret = WebhookSecret
 	}
 	s := &Stack{AppURL: app, MockURL: mock, webhookSecret: secret, HostRewrites: map[string]string{}}
+	s.MockInternalURL = mock
 	if h := os.Getenv("FT_MOCK_WEB_INTERNAL"); h != "" {
 		s.HostRewrites[h] = mock
+		s.MockInternalURL = "http://" + h
 	}
 	return s, nil
 }

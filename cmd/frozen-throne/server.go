@@ -17,6 +17,7 @@ import (
 	"github.com/TheJokersThief/frozen-throne/internal/engine"
 	"github.com/TheJokersThief/frozen-throne/internal/github"
 	"github.com/TheJokersThief/frozen-throne/internal/reconcile"
+	"github.com/TheJokersThief/frozen-throne/internal/slack"
 	"github.com/TheJokersThief/frozen-throne/internal/store"
 	"github.com/TheJokersThief/frozen-throne/internal/webui"
 )
@@ -35,14 +36,31 @@ func (n triggerNotifier) FreezeStateChanged(_ context.Context, ev api.FreezeChan
 	n.t.Installation(ev.InstallationID)
 }
 
+// background is the work that runs beside the HTTP handler: the reconciler
+// and the Slack window watcher, plus the Slack delivery queue.
+type background struct {
+	rec     *reconcile.Reconciler
+	watcher *slack.WindowWatcher
+	slack   *slack.Notifier
+}
+
+// Run blocks until ctx is cancelled.
+func (b *background) Run(ctx context.Context) error {
+	go b.watcher.Run(ctx)
+	return b.rec.Run(ctx)
+}
+
+// Close drains pending Slack notifications.
+func (b *background) Close() { b.slack.Close() }
+
 // buildServer wires the API, webhook receiver, reconciler and dashboard into
 // one handler served from a single origin.
-func buildServer(cfg config.Config, st *store.SQLite, ui fs.FS, logger *slog.Logger) (http.Handler, *reconcile.Reconciler, error) {
+func buildServer(cfg config.Config, st *store.SQLite, ui fs.FS, logger *slog.Logger) (http.Handler, *background, error) {
 	key, err := github.ParsePrivateKey(cfg.PrivateKeyPEM)
 	if err != nil {
 		return nil, nil, fmt.Errorf("FT_GITHUB_PRIVATE_KEY: %w", err)
 	}
-	gh, err := github.NewClient(github.Config{AppID: cfg.AppID, PrivateKey: key})
+	gh, err := github.NewClient(github.Config{AppID: cfg.AppID, PrivateKey: key, BaseURL: cfg.GitHubAPIURL})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -55,16 +73,24 @@ func buildServer(cfg config.Config, st *store.SQLite, ui fs.FS, logger *slog.Log
 	if err != nil {
 		return nil, nil, err
 	}
-	srv, err := api.New(api.Config{SessionSecret: cfg.SessionSecret, SecureCookies: cfg.SecureCookies, Logger: logger}, api.Deps{
+	notifier := slack.New(slack.Options{Store: st, Logger: logger, AllowAnyHost: cfg.SlackAllowAnyHost})
+	watcher := slack.NewWindowWatcher(slack.WindowOptions{Store: st, Notifier: notifier, DashboardURL: cfg.BaseURL, Logger: logger})
+	srv, err := api.New(api.Config{
+		SessionSecret: cfg.SessionSecret, SecureCookies: cfg.SecureCookies, Logger: logger,
+		DashboardURL: cfg.BaseURL, SlackAllowAnyHost: cfg.SlackAllowAnyHost,
+	}, api.Deps{
 		Store:  st,
 		Engine: eng,
 		OAuth: &api.GitHubOAuth{
 			ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, RedirectURL: cfg.RedirectURL(),
+			WebBase: cfg.GitHubWebURL, APIBase: cfg.GitHubAPIURL,
 		},
-		Permissions: &api.GitHubPermissions{},
+		Permissions: &api.GitHubPermissions{APIBase: cfg.GitHubAPIURL},
 		Notifier:    triggerNotifier{rec},
+		Slack:       notifier,
 	})
 	if err != nil {
+		notifier.Close()
 		return nil, nil, err
 	}
 	mux := http.NewServeMux()
@@ -72,7 +98,7 @@ func buildServer(cfg config.Config, st *store.SQLite, ui fs.FS, logger *slog.Log
 	mux.Handle("/api/", srv.Handler())
 	mux.Handle("/healthz", srv.Handler())
 	mux.Handle("/", webui.Handler(ui))
-	return mux, rec, nil
+	return mux, &background{rec: rec, watcher: watcher, slack: notifier}, nil
 }
 
 // serve runs the server until SIGINT/SIGTERM.
@@ -91,13 +117,14 @@ func serve() error {
 	}
 	defer st.Close()
 
-	h, rec, err := buildServer(cfg, st, webui.Embedded(), logger)
+	h, bg, err := buildServer(cfg, st, webui.Embedded(), logger)
 	if err != nil {
 		return err
 	}
+	defer bg.Close()
 	go func() {
-		if err := rec.Run(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("reconciler stopped", "err", err)
+		if err := bg.Run(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("background workers stopped", "err", err)
 		}
 	}()
 

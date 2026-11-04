@@ -39,6 +39,7 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{cfg: cfg, mux: http.NewServeMux(), st: newState()}
 	s.routesGitHub()
 	s.routesControl()
+	s.routesSlack()
 	return s, nil
 }
 

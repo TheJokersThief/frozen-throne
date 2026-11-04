@@ -129,3 +129,13 @@ func (se *Session) Do(method, path string, body any) (int, []byte) {
 	data, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, data
 }
+
+// Anonymous returns a Session with no cookie, for unauthenticated requests.
+func (s *Stack) Anonymous(t *testing.T) *Session {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Session{t: t, base: s.AppURL, Login: "(anonymous)", c: &http.Client{Jar: jar, Timeout: 20 * time.Second}}
+}

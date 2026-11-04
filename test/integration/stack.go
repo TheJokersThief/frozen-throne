@@ -34,6 +34,11 @@ const (
 	// (FT_GITHUB_WEB_URL=http://mockgithub:8080). It is not resolvable from
 	// the host, so Login rewrites it (see Stack.HostRewrites).
 	ComposeMockWeb = "mockgithub:8080"
+
+	// ReconcileInterval is the app's periodic full re-check (FT_RECONCILE_INTERVAL).
+	// Short so "missed webhook heals" scenarios finish quickly; same value as
+	// docker-compose.yml.
+	ReconcileInterval = "2s"
 )
 
 // Modes selected by INTEGRATION_MODE.
@@ -47,11 +52,14 @@ const (
 // Stack is a running app plus the mock GitHub it talks to. It is created once
 // in TestMain and shared; tests are serial and call Reset first.
 type Stack struct {
-	Mode     string
-	AppURL   string // host-reachable base URL of the app
-	MockURL  string // host-reachable base URL of the mock
-	Mock     *mockgithub.Client
-	Webhooks *webhooks.Sender // correctly signed; see NewSender for variants
+	Mode    string
+	AppURL  string // host-reachable base URL of the app
+	MockURL string // host-reachable base URL of the mock
+	// MockInternalURL is how the app reaches the mock (http://mockgithub:8080 in
+	// compose). Used for URLs the app must call back, such as the fake Slack.
+	MockInternalURL string
+	Mock            *mockgithub.Client
+	Webhooks        *webhooks.Sender // correctly signed; see NewSender for variants
 
 	// HostRewrites maps a host[:port] that appears in redirects issued by the
 	// app or the mock but is only resolvable inside the stack (e.g. the compose

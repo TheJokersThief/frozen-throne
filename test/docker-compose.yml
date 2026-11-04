@@ -40,17 +40,19 @@ services:
       mockgithub:
         condition: service_healthy
     environment:
-      FT_LISTEN: ":8080"
+      FT_LISTEN_ADDR: ":8080"
       FT_DB_PATH: /data/frozen-throne.db
       FT_GITHUB_API_URL: http://mockgithub:8080
       FT_GITHUB_WEB_URL: http://mockgithub:8080
-      FT_APP_ID: *app-id
-      FT_APP_PRIVATE_KEY_FILE: /run/test/app-key.pem
-      FT_WEBHOOK_SECRET: whsec_integration_test
-      FT_OAUTH_CLIENT_ID: *oauth-id
-      FT_OAUTH_CLIENT_SECRET: *oauth-secret
-      FT_PUBLIC_URL: http://localhost:${APP_PORT:-18080}
+      FT_GITHUB_APP_ID: *app-id
+      FT_GITHUB_PRIVATE_KEY_FILE: /run/test/app-key.pem
+      FT_GITHUB_WEBHOOK_SECRET: whsec_integration_test
+      FT_GITHUB_CLIENT_ID: *oauth-id
+      FT_GITHUB_CLIENT_SECRET: *oauth-secret
+      FT_BASE_URL: http://localhost:${APP_PORT:-18080}
       FT_SESSION_SECRET: integration-test-session-secret-32b!
+      FT_RECONCILE_INTERVAL: 2s
+      FT_SLACK_ALLOW_ANY_HOST: "true"
     volumes:
       - ./testdata/app-key.pem:/run/test/app-key.pem:ro
     tmpfs:
@@ -58,7 +60,7 @@ services:
     ports:
       - "127.0.0.1:${APP_PORT:-18080}:8080"
     healthcheck:
-      test: ["CMD", "/ft-test-app", "-healthcheck"]
+      test: ["CMD", "/frozen-throne", "-healthcheck"]
       interval: 2s
       timeout: 3s
       retries: 15

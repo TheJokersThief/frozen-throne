@@ -142,3 +142,10 @@ func (c *Client) ClearCalls(ctx context.Context) error {
 func (c *Client) AddFault(ctx context.Context, f Fault) error {
 	return c.call(ctx, http.MethodPost, "/_mock/faults", f, nil)
 }
+
+// SlackPosts returns the messages the fake Slack received, oldest first.
+func (c *Client) SlackPosts(ctx context.Context) ([]SlackPost, error) {
+	var out []SlackPost
+	err := c.call(ctx, http.MethodGet, "/_mock/slack/posts", nil, &out)
+	return out, err
+}
