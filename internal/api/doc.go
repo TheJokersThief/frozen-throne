@@ -7,7 +7,7 @@ package api
 //		Engine:      engine.New(),
 //		OAuth:       &api.GitHubOAuth{ClientID: id, ClientSecret: sec, RedirectURL: base + "/api/v1/auth/callback"},
 //		Permissions: &api.GitHubPermissions{},
-//		Notifier:    reconciler, // implements api.ChangeNotifier
+//		Notifier:    api.NewTriggerNotifier(reconciler),
 //	})
 //	http.ListenAndServe(addr, srv.Handler())
 //
