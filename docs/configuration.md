@@ -18,7 +18,7 @@ once, so a first run is one round trip.
 | `FT_SESSION_SECRET` / `_FILE` | yes | | At least 32 characters of randomness (`openssl rand -hex 32`). Signs session cookies and encrypts stored GitHub user tokens. Changing it logs everyone out. |
 | `FT_DB_PATH` | no | `frozen-throne.db` (`/data/frozen-throne.db` in the image) | SQLite file. Created and migrated on start. Keep it on a persistent volume. |
 | `FT_LISTEN_ADDR` | no | `:8080` | Address to listen on. TLS is not terminated here; use a reverse proxy. |
-| `FT_RECONCILE_INTERVAL` | no | `5m` | How often every repo's check is re-evaluated to heal missed webhooks (Go duration, e.g. `30s`, `10m`; negative disables). |
+| `FT_RECONCILE_INTERVAL` | no | `5m` | How often every repo's check is re-evaluated to heal missed webhooks (Go duration, e.g. `30s`, `10m`; `0` or unset means 5m; negative disables). |
 
 ## HTTP endpoints
 

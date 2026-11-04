@@ -130,3 +130,11 @@ func TestInvalidValues(t *testing.T) {
 		}
 	}
 }
+
+func TestBaseURLWithPathRejected(t *testing.T) {
+	m := valid()
+	m["FT_BASE_URL"] = "https://x.example.com/foo"
+	if _, err := Load(env(m), readNone); err == nil || !strings.Contains(err.Error(), "FT_BASE_URL") {
+		t.Fatalf("err=%v", err)
+	}
+}

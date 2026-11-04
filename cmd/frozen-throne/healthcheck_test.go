@@ -12,6 +12,7 @@ func TestHealthcheckURL(t *testing.T) {
 		"0.0.0.0:9000":   "http://127.0.0.1:9000/healthz",
 		"127.0.0.1:1234": "http://127.0.0.1:1234/healthz",
 		"[::]:8081":      "http://127.0.0.1:8081/healthz",
+		"10.0.0.5:8080":  "http://10.0.0.5:8080/healthz",
 	} {
 		if got := healthURL(in); got != want {
 			t.Errorf("healthURL(%q) = %q, want %q", in, got, want)

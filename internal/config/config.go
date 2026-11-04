@@ -67,8 +67,8 @@ func Load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 	base := strings.TrimRight(getenv("FT_BASE_URL"), "/")
 	if base == "" {
 		bad("FT_BASE_URL is required (public URL of this server, e.g. https://freeze.example.com)")
-	} else if u, err := url.Parse(base); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		bad("FT_BASE_URL must be an absolute http(s) URL, got %q", base)
+	} else if u, err := url.Parse(base); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" {
+		bad("FT_BASE_URL must be an absolute http(s) origin without a path, got %q", base)
 	} else {
 		c.BaseURL = base
 		c.SecureCookies = u.Scheme == "https"

@@ -10,11 +10,14 @@ import (
 
 // healthURL is the loopback /healthz URL for a listen address.
 func healthURL(listen string) string {
-	_, port, err := net.SplitHostPort(listen)
+	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
-		port = "8080"
+		host, port = "", "8080"
 	}
-	return "http://" + net.JoinHostPort("127.0.0.1", port) + "/healthz"
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + "/healthz"
 }
 
 func probe(url string) error {

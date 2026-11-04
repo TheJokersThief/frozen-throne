@@ -30,10 +30,10 @@ Images: `ghcr.io/thejokersthief/frozen-throne`. Binaries for linux/darwin
 | `cmd/frozen-throne` | Main binary. |
 | `internal/model` | Domain types shared by all packages (no dependencies). |
 | `internal/store` | Store interfaces (`store.go`), embedded SQL migrations (`migrations/`) and the SQLite implementation. |
-| `internal/engine` | Pure freeze evaluation: "is repo X frozen at T, considering bypass for PR N". Interface and types only for now. |
-| `internal/github` | GitHub App: webhooks, Check Runs (to come). |
+| `internal/engine` | Pure freeze evaluation: "is repo X frozen at T, considering bypass for PR N". Evaluates freeze state from org/repo freezes, windows and bypasses. |
+| `internal/github` | GitHub App: webhooks, Check Runs. |
 | `internal/reconcile` | Keeps Check Runs correct: triggers, window-boundary timers and a periodic pass feed a fair, bounded work queue with rate-limit backoff. |
-| `internal/api` | HTTP handlers, OAuth, permissions (to come). |
+| `internal/api` | HTTP handlers, OAuth, permissions, audit. |
 | `api/openapi.yaml` | The REST API contract. Source of truth for handlers and the web client. |
 | `web/` | React + TypeScript (Vite) dashboard. |
 | `internal/config` | Environment-variable configuration. |

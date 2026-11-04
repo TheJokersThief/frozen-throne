@@ -7,7 +7,17 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+
   binaries:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub release
@@ -33,6 +43,7 @@ jobs:
             --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
 
   image:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,7 +64,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
       - uses: docker/build-push-action@v6
         with:
           context: .

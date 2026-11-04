@@ -28,6 +28,7 @@ GitHub → *Settings* (your user, or the organization) → *Developer settings* 
 |------------|--------|-----|
 | Checks | Read & write | Post and update the `frozen-throne` Check Run. |
 | Pull requests | Read-only | List open PRs to re-evaluate them; receive PR events. |
+| Merge queues | Read-only | Lets the App subscribe to `Merge group` events (only needed if you use merge queues). |
 | Metadata | Read-only | Mandatory for every App. |
 
 **Organization permissions**
@@ -105,7 +106,7 @@ all repositories or just the ones to protect. As soon as the installation
 webhook arrives the server registers the repos and posts a Check Run named
 **`frozen-throne`** on every open PR (green while thawed).
 
-In the GitHub App's *Advanced* tab, *Recent Deliveries* should show `200`
+In the GitHub App's *Advanced* tab, *Recent Deliveries* should show `204`
 responses.
 
 ## 4. Require the check in branch protection
