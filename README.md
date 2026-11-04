@@ -70,7 +70,7 @@ Requirements: Go and Node 22. Use two terminals.
 
 ```sh
 # 1. Terminal one, repo root: the real API with a fake GitHub login and seeded data.
-make dev-server          # = go run ./cmd/dev-server, listens on :8080
+make dev-server          # = go run ./cmd/dev-server, listens on 127.0.0.1:8080
 
 # 2. Terminal two: the dashboard.
 cd web && npm ci && npm run dev
@@ -85,7 +85,8 @@ flags (pass them to `go run`; `make dev-server` passes none):
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `-addr` | `:8080` | Listen address. |
+| `-addr` | `127.0.0.1:8080` | Listen address. Must be loopback unless `-allow-remote` is given. |
+| `-allow-remote` | off | Permit a non-loopback `-addr` (e.g. `:8080`). Anyone who can reach it is logged in; use only on a trusted network. |
 | `-db` | `./dev.db` | SQLite file, seeded when empty (git-ignored). Delete it to reseed. |
 | `-role` | `admin` | Permissions of the dev user: `admin`, `write`, `read` or `none`. |
 

@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -133,11 +134,35 @@ func newServer(ctx context.Context, st store.Store, role string, secret []byte) 
 	}, api.Deps{Store: st, Engine: engine.New(), OAuth: devOAuth{}, Permissions: perms})
 }
 
+// checkBindAddr refuses non-loopback listen addresses (including an empty
+// host, which binds every interface) unless allowRemote is set: the dev server
+// logs everyone in, so it must not be reachable from the network by accident.
+func checkBindAddr(addr string, allowRemote bool) error {
+	if allowRemote {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid -addr %q: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("refusing to listen on non-loopback address %q: the dev server logs everyone in; pass -allow-remote to override", addr)
+}
+
 func main() {
-	addr := flag.String("addr", ":8080", "listen address")
+	addr := flag.String("addr", "127.0.0.1:8080", "listen address (must be loopback unless -allow-remote)")
+	allowRemote := flag.Bool("allow-remote", false, "allow a non-loopback -addr (anyone who can reach it is logged in)")
 	dbPath := flag.String("db", "./dev.db", "SQLite database file (seeded when empty)")
 	role := flag.String("role", "admin", "role of the dev user: admin|write|read|none")
 	flag.Parse()
+	if err := checkBindAddr(*addr, *allowRemote); err != nil {
+		log.Fatal(err)
+	}
 
 	secret := []byte(os.Getenv("FT_DEV_SESSION_SECRET"))
 	if len(secret) == 0 {

@@ -7,7 +7,7 @@ all: build
 build: ## Build the Go binary into bin/
 	$(GO) build -o bin/frozen-throne ./cmd/frozen-throne
 
-dev-server: ## Run the API with fake GitHub login + seeded data on :8080 (DEV ONLY)
+dev-server: ## Run the API with fake GitHub login + seeded data on 127.0.0.1:8080 (DEV ONLY)
 	$(GO) run ./cmd/dev-server
 
 test: ## Run Go tests

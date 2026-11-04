@@ -96,6 +96,32 @@ func TestRoleNoneSeesNothing(t *testing.T) {
 	}
 }
 
+func TestCheckBindAddr(t *testing.T) {
+	cases := []struct {
+		addr        string
+		allowRemote bool
+		wantErr     bool
+	}{
+		{"127.0.0.1:8080", false, false},
+		{"localhost:8080", false, false},
+		{"[::1]:8080", false, false},
+		{":8080", false, true},
+		{"0.0.0.0:8080", false, true},
+		{"[::]:8080", false, true},
+		{"192.168.1.5:8080", false, true},
+		{"example.com:8080", false, true},
+		{":8080", true, false},
+		{"0.0.0.0:8080", true, false},
+		{"nonsense", false, true},
+	}
+	for _, c := range cases {
+		err := checkBindAddr(c.addr, c.allowRemote)
+		if (err != nil) != c.wantErr {
+			t.Errorf("checkBindAddr(%q, %v) err = %v, wantErr %v", c.addr, c.allowRemote, err, c.wantErr)
+		}
+	}
+}
+
 func TestBadRole(t *testing.T) {
 	if _, err := newDevPerms("root"); err == nil {
 		t.Fatal("expected error")
