@@ -71,7 +71,7 @@ Requirements: Go and Node 22. Use two terminals.
 
 ```sh
 # 1. Terminal one, repo root: the real API with a fake GitHub login and seeded data.
-make dev-server          # = go run ./cmd/dev-server, listens on 127.0.0.1:8080
+just dev-server          # = go run ./cmd/dev-server, listens on 127.0.0.1:8080
 
 # 2. Terminal two: the dashboard.
 cd web && npm ci && npm run dev
@@ -82,7 +82,7 @@ cd web && npm ci && npm run dev
    started from.
 
 `cmd/dev-server` is **DEV ONLY**: anyone who can reach the port is logged in. It takes
-flags (pass them to `go run`; `make dev-server` passes none):
+flags (pass them to `go run`; `just dev-server` forwards any args you give it):
 
 | Flag | Default | Meaning |
 |------|---------|---------|
@@ -141,8 +141,8 @@ Component tests run the whole app against the same mock handlers.
 status codes, error shapes) against `api/openapi.yaml`, so the mock cannot drift from
 the spec. When the spec changes:
 
-1. Edit `api/openapi.yaml`, then `make lint-api`.
-2. Regenerate types: `make gen-api` (commit `web/src/api/schema.d.ts`).
+1. Edit `api/openapi.yaml`, then `just lint-api`.
+2. Regenerate types: `just gen-api` (commit `web/src/api/schema.d.ts`).
 3. Run `npm test`; the contract test reports each route or status code whose mock
    (`web/src/mocks/handlers.ts`, `db.ts`) no longer matches. Fix the mock, and the Go
    handlers in `internal/api`, until it passes. Run `npm run typecheck` too: it covers
