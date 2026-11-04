@@ -21,6 +21,7 @@ recorded reason.
 | `internal/store` | Store interfaces (`store.go`), embedded SQL migrations (`migrations/`) and the SQLite implementation. |
 | `internal/engine` | Pure freeze evaluation: "is repo X frozen at T, considering bypass for PR N". Interface and types only for now. |
 | `internal/github` | GitHub App: webhooks, Check Runs (to come). |
+| `internal/reconcile` | Keeps Check Runs correct: triggers, window-boundary timers and a periodic pass feed a fair, bounded work queue with rate-limit backoff. |
 | `internal/api` | HTTP handlers, sessions, OAuth, permissions. |
 | `cmd/dev-server` | Dev-only API server: real handlers, fake GitHub login, seeded data. |
 | `api/openapi.yaml` | The REST API contract. Source of truth for handlers and the web client. |
@@ -35,14 +36,14 @@ needs a reason.
 
 ## Develop
 
-Requirements: Go (see `go.mod`) and Node 22.
+Requirements: Go (see `go.mod`), Node 22 and [just](https://github.com/casey/just).
 
 ```sh
-make build        # go build into bin/
-make test         # go test ./...
-make lint         # go vet, gofmt check, OpenAPI lint, web typecheck
-make web-build    # production web build into web/dist
-make check        # everything CI runs
+just build        # go build into bin/
+just test         # go test ./...
+just lint         # go vet, gofmt check, OpenAPI lint, web typecheck
+just web-build    # production web build into web/dist
+just check        # everything CI runs
 ```
 
 ### API types
@@ -51,8 +52,8 @@ make check        # everything CI runs
 After editing the spec run:
 
 ```sh
-make gen-api      # or: cd web && npm run gen:api
-make lint-api     # validate the spec (redocly)
+just gen-api      # or: cd web && npm run gen:api
+just lint-api     # validate the spec (redocly)
 ```
 
 CI fails if the committed types are out of date.
