@@ -7,9 +7,21 @@ while frozen. Freezes can be manual (repo or org-wide) or scheduled (one-off or
 recurring windows with a timezone), and individual PRs can be bypassed with a
 recorded reason.
 
-> **Status:** v2 is a rewrite in progress. This branch contains the foundation
-> (schema, store, engine contract, OpenAPI spec, web skeleton); the server is
-> not runnable yet.
+## Self-hosting
+
+One container (or one static binary with the dashboard embedded), one SQLite
+file. Follow the [setup guide](docs/setup.md): create the GitHub App, set the
+[environment variables](docs/configuration.md), install the App, and require
+the `frozen-throne` check in branch protection.
+
+```sh
+cp docker-compose.example.yml docker-compose.yml && cp .env.example .env
+# edit .env, add the App private key, then:
+docker compose up -d
+```
+
+Images: `ghcr.io/thejokersthief/frozen-throne`. Binaries for linux/darwin
+(amd64, arm64) are attached to each GitHub release.
 
 ## Layout
 
@@ -24,7 +36,9 @@ recorded reason.
 | `internal/api` | HTTP handlers, OAuth, permissions (to come). |
 | `api/openapi.yaml` | The REST API contract. Source of truth for handlers and the web client. |
 | `web/` | React + TypeScript (Vite) dashboard. |
-| `docs/` | Design documents. |
+| `internal/config` | Environment-variable configuration. |
+| `internal/webui` | Embeds the built dashboard (`web/dist`) and serves it with SPA fallback. |
+| `docs/` | Setup guide and configuration reference. |
 
 Design rules that the schema and contracts encode: one deployment serves many
 GitHub installations; an org-wide freeze or window is stored once per
@@ -41,6 +55,9 @@ just build        # go build into bin/
 just test         # go test ./...
 just lint         # go vet, gofmt check, OpenAPI lint, web typecheck
 just web-build    # production web build into web/dist
+just embed-web    # web-build, then copy into the Go embed dir (go build then yields a full binary)
+just release-build  # static binaries for linux/darwin amd64+arm64 into dist/
+just image        # docker build
 just check        # everything CI runs
 ```
 
