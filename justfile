@@ -21,7 +21,12 @@ fmt:
     @test -z "$(gofmt -l .)" || (gofmt -l . && echo "run gofmt -w ." && exit 1)
 
 # Go vet, gofmt, OpenAPI lint, TS typecheck
-lint: vet fmt lint-api web-typecheck
+lint: vet fmt lint-api web-typecheck lint-workflows
+
+# Check CI workflow triggers (and run actionlint if installed)
+lint-workflows:
+    scripts/check-workflows.sh
+    @if command -v actionlint >/dev/null; then actionlint; fi
 
 # Install web dependencies
 web-install:
