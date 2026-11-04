@@ -75,5 +75,13 @@ release-build: embed-web
 image tag="frozen-throne:dev":
     docker build --build-arg VERSION={{version}} -t {{tag}} .
 
+# Integration tests against the mock GitHub (INTEGRATION_MODE=auto|compose|inprocess|external; see test/README.md)
+integration:
+    {{go}} test -tags integration -race -count=1 -timeout 20m ./test/integration/...
+
+# Integration tests against the docker compose stack
+integration-compose:
+    INTEGRATION_MODE=compose {{go}} test -tags integration -race -count=1 -timeout 20m ./test/integration/...
+
 # Everything CI runs
 check: lint test web-test build web-build

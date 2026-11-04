@@ -1,0 +1,20 @@
+{
+  "action": {{q .Action}},
+  "merge_group": {
+    "head_sha": {{q .HeadSHA}},
+    "head_ref": "refs/heads/gh-readonly-queue/{{.DefaultBranch}}/pr-{{.PRNumber}}-{{.HeadSHA}}",
+    "base_ref": "refs/heads/{{.DefaultBranch}}",
+    "base_sha": {{q .BaseSHA}},
+    "head_commit": {
+      "id": {{q .HeadSHA}}, "tree_id": "3333333333333333333333333333333333333333",
+      "message": "Merge pull request #{{.PRNumber}} from {{.Owner}}/feature",
+      "timestamp": "2026-01-15T11:00:00Z",
+      "author": { "name": "The Octocat", "email": "octocat@github.com" },
+      "committer": { "name": "GitHub", "email": "noreply@github.com" }
+    }
+  },
+  "repository": {{template "repository" .}},
+  "organization": {{template "owner" .}},
+  "sender": {{template "sender" .}},
+  "installation": {{template "thin_installation" .}}
+}

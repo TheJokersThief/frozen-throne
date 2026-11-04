@@ -1,0 +1,31 @@
+{{define "sender"}}{
+    "login": {{q .Sender}}, "id": 583231, "node_id": "MDQ6VXNlcjU4MzIzMQ==", "type": "User", "site_admin": false,
+    "avatar_url": "https://avatars.githubusercontent.com/u/583231?v=4",
+    "html_url": "https://github.com/{{.Sender}}", "url": "https://api.github.com/users/{{.Sender}}"
+  }{{end}}
+{{define "owner"}}{
+      "login": {{q .Owner}}, "id": {{.AccountID}}, "node_id": "MDEyOk9yZ2FuaXphdGlvbjMwMDE=", "type": {{q .AccountType}}, "site_admin": false,
+      "avatar_url": "https://avatars.githubusercontent.com/u/{{.AccountID}}?v=4",
+      "html_url": "https://github.com/{{.Owner}}", "url": "https://api.github.com/users/{{.Owner}}"
+    }{{end}}
+{{define "repository"}}{
+    "id": {{.RepoID}}, "node_id": "R_kgDO{{.RepoID}}", "name": {{q .Repo}}, "full_name": {{q (printf "%s/%s" .Owner .Repo)}},
+    "private": {{.Private}}, "archived": false, "disabled": false, "fork": false,
+    "owner": {{template "owner" .}},
+    "html_url": "https://github.com/{{.Owner}}/{{.Repo}}", "url": "https://api.github.com/repos/{{.Owner}}/{{.Repo}}",
+    "default_branch": {{q .DefaultBranch}}, "visibility": "{{if .Private}}private{{else}}public{{end}}"
+  }{{end}}
+{{define "thin_installation"}}{ "id": {{.InstallationID}}, "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uMQ==" }{{end}}
+{{define "full_installation"}}{
+    "id": {{.InstallationID}}, "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uMQ==",
+    "app_id": 123456, "app_slug": "frozen-throne", "target_type": {{q .AccountType}}, "target_id": {{.AccountID}},
+    "repository_selection": "selected", "suspended_at": null, "suspended_by": null,
+    "account": {
+      "login": {{q .AccountLogin}}, "id": {{.AccountID}}, "type": {{q .AccountType}}, "site_admin": false,
+      "avatar_url": "https://avatars.githubusercontent.com/u/{{.AccountID}}?v=4",
+      "html_url": "https://github.com/{{.AccountLogin}}"
+    },
+    "permissions": { "checks": "write", "pull_requests": "read", "metadata": "read" },
+    "events": ["check_run", "merge_group", "pull_request"]
+  }{{end}}
+{{define "thin_repo"}}{ "id": {{.RepoID}}, "node_id": "R_kgDO{{.RepoID}}", "name": {{q .Repo}}, "full_name": {{q (printf "%s/%s" .Owner .Repo)}}, "private": {{.Private}} }{{end}}

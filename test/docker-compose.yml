@@ -1,0 +1,65 @@
+# Integration stack: the app under test plus the mock GitHub it talks to.
+# Run from anywhere:  docker compose -f test/docker-compose.yml up --build
+# All values below are fixed throwaway test values.
+name: frozen-throne-it
+
+x-test-env:
+  app-id: &app-id "424242"
+  oauth-id: &oauth-id "Iv1.testclient"
+  oauth-secret: &oauth-secret "testclientsecret"
+
+services:
+  mockgithub:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+      target: mockgithub
+    environment:
+      MOCK_LISTEN: ":8080"
+      MOCK_APP_ID: *app-id
+      MOCK_APP_PUBLIC_KEY_FILE: /run/test/app-key.pem
+      MOCK_CLIENT_ID: *oauth-id
+      MOCK_CLIENT_SECRET: *oauth-secret
+    volumes:
+      - ./testdata/app-key.pem:/run/test/app-key.pem:ro
+    ports:
+      - "127.0.0.1:${MOCK_PORT:-18081}:8080"
+    healthcheck:
+      test: ["CMD", "/mockgithub", "-healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 2s
+
+  app:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+      target: app
+    depends_on:
+      mockgithub:
+        condition: service_healthy
+    environment:
+      FT_LISTEN: ":8080"
+      FT_DB_PATH: /data/frozen-throne.db
+      FT_GITHUB_API_URL: http://mockgithub:8080
+      FT_GITHUB_WEB_URL: http://mockgithub:8080
+      FT_APP_ID: *app-id
+      FT_APP_PRIVATE_KEY_FILE: /run/test/app-key.pem
+      FT_WEBHOOK_SECRET: whsec_integration_test
+      FT_OAUTH_CLIENT_ID: *oauth-id
+      FT_OAUTH_CLIENT_SECRET: *oauth-secret
+      FT_PUBLIC_URL: http://localhost:${APP_PORT:-18080}
+      FT_SESSION_SECRET: integration-test-session-secret-32b!
+    volumes:
+      - ./testdata/app-key.pem:/run/test/app-key.pem:ro
+    tmpfs:
+      - /data:uid=65532,gid=65532,mode=0755
+    ports:
+      - "127.0.0.1:${APP_PORT:-18080}:8080"
+    healthcheck:
+      test: ["CMD", "/ft-test-app", "-healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 2s
