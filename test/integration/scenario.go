@@ -32,6 +32,7 @@ type Env struct {
 	Org            string // also the repo owner
 	Repo           string
 
+	Owner      string // org owner (admin role): may also freeze the whole org and manage Slack
 	Maintainer string // may freeze: maintain on the repo, org member
 	Member     string // read-only: pull on the repo, org member
 	Outsider   string // no access at all
@@ -47,7 +48,7 @@ func newEnv(t *testing.T, s *Stack, n int) *Env {
 		T: t, S: s,
 		InstallationID: base, AccountID: base + 1_000_000_000_000, RepoID: base + 2_000_000_000_000,
 		Org: fmt.Sprintf("org%d", base), Repo: "widgets",
-		Maintainer: fmt.Sprintf("maint%d", base), Member: fmt.Sprintf("member%d", base), Outsider: fmt.Sprintf("outsider%d", base),
+		Owner: fmt.Sprintf("owner%d", base), Maintainer: fmt.Sprintf("maint%d", base), Member: fmt.Sprintf("member%d", base), Outsider: fmt.Sprintf("outsider%d", base),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -64,6 +65,7 @@ func newEnv(t *testing.T, s *Stack, n int) *Env {
 		{ID: base + 3_000_000_000_000, Login: e.Maintainer, Name: "Maintainer", RepoPerms: map[string]string{full: "maintain"}, OrgRoles: map[string]string{e.Org: "member"}},
 		{ID: base + 4_000_000_000_000, Login: e.Member, Name: "Member", RepoPerms: map[string]string{full: "pull"}, OrgRoles: map[string]string{e.Org: "member"}},
 		{ID: base + 5_000_000_000_000, Login: e.Outsider, Name: "Outsider"},
+		{ID: base + 6_000_000_000_000, Login: e.Owner, Name: "Owner", OrgRoles: map[string]string{e.Org: "admin"}},
 	}
 	for _, u := range users {
 		_, err := s.Mock.SeedUser(ctx, u)
@@ -112,8 +114,8 @@ func (e *Env) ListRepos(sess *Session) []string {
 }
 
 // SHA returns a stable, unique-per-test 40-hex commit id for label.
-func (e *Env) SHA(label string) string {
-	sum := sha1.Sum([]byte(fmt.Sprintf("%d/%s", e.RepoID, label))) //nolint:gosec
+func (e *Env) SHA(label string, parts ...any) string {
+	sum := sha1.Sum([]byte(fmt.Sprintf("%d/%s/%v", e.RepoID, label, parts))) //nolint:gosec
 	return hex.EncodeToString(sum[:])
 }
 
@@ -226,18 +228,3 @@ func (e *Env) Freeze(sess *Session, reason string) {
 		e.T.Fatalf("freeze: status %d: %s", st, body)
 	}
 }
-
-// EXTENSION POINT: API-server / reconcile scenarios.
-//
-// Today the test app has no ChangeNotifier (test/app sets Notifier: nil), so a
-// freeze made through the API does not touch existing Check Runs; only
-// webhooks produce them. When the reconcile loop lands:
-//
-//  1. wire the real notifier into test/app (the marked line in app.go);
-//  2. add scenarios here, e.g. "freeze via API flips the check of every open PR
-//     in the repo": OpenPR several PRs, Freeze, then WaitCheck(sha,
-//     Conclusion("failure")) for each, and the reverse for thaw;
-//  3. use Mock.AddFault for retry/backoff scenarios and Mock.Calls for call
-//     counts.
-//
-// Keep scenario helpers on Env so tests stay a few readable lines.
