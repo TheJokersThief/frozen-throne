@@ -103,6 +103,9 @@ func (r *recorder) take() []FreezeChange {
 	return out
 }
 
+// envOpt customises the server built by newEnv (store is already in deps).
+type envOpt func(t *testing.T, cfg *Config, deps *Deps)
+
 type env struct {
 	t     *testing.T
 	srv   *Server
@@ -117,7 +120,7 @@ type env struct {
 
 // Users: alice=org owner, bob=maintainer of web only, carol=member of web,
 // dave=no access. Ids 1..4.
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...envOpt) *env {
 	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "ft.db"))
@@ -148,10 +151,15 @@ func newEnv(t *testing.T) *env {
 		},
 	}
 	rec := &recorder{}
-	srv, err := New(Config{
+	cfg := Config{
 		SessionSecret: bytes.Repeat([]byte("k"), 32), PermissionCacheTTL: -1,
 		Now: func() time.Time { return now },
-	}, Deps{Store: st, Engine: fakeEngine{}, OAuth: fakeOAuth{token: "gh-token"}, Permissions: perms, Notifier: rec})
+	}
+	deps := Deps{Store: st, Engine: fakeEngine{}, OAuth: fakeOAuth{token: "gh-token"}, Permissions: perms, Notifier: rec}
+	for _, o := range opts {
+		o(t, &cfg, &deps)
+	}
+	srv, err := New(cfg, deps)
 	must(err)
 	return &env{t: t, srv: srv, h: srv.Handler(), st: st, perms: perms, rec: rec, now: now, web: web, api: api}
 }

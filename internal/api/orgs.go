@@ -106,7 +106,7 @@ func (s *Server) freezeOrg(c *call) error {
 		}
 		return err
 	}
-	s.emit(ctx, pendingEvents{{InstallationID: oc.inst.ID, Action: model.AuditFreeze}})
+	s.emit(ctx, pendingEvents{{InstallationID: oc.inst.ID, Action: model.AuditFreeze, Actor: c.actor.User.Login, Reason: reason, Scope: model.FreezeScopeOrg}})
 	return c.json(http.StatusCreated, out)
 }
 
@@ -145,7 +145,7 @@ func (s *Server) thawOrg(c *call) error {
 		}
 		return err
 	}
-	s.emit(ctx, pendingEvents{{InstallationID: oc.inst.ID, Action: model.AuditThaw}})
+	s.emit(ctx, pendingEvents{{InstallationID: oc.inst.ID, Action: model.AuditThaw, Actor: c.actor.User.Login, Scope: model.FreezeScopeOrg}})
 	return c.json(http.StatusOK, out)
 }
 

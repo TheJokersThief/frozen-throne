@@ -807,6 +807,8 @@ export interface components {
             configured: boolean;
             enabled: boolean;
             channel?: string;
+            /** @description Log-safe form of the stored webhook URL (host and last four characters). Omitted when not configured. */
+            readonly webhook_url_masked?: string;
             /** @description Empty means all events. */
             events: components["schemas"]["SlackEvent"][];
         };
