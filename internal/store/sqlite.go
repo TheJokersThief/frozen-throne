@@ -46,7 +46,11 @@ func Open(ctx context.Context, path string) (*SQLite, error) {
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	dsn += sep + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	// _txlock=immediate: every transaction takes the write lock at BEGIN and
+	// waits for it (busy_timeout). A deferred transaction that reads and then
+	// writes fails at once with SQLITE_BUSY if another connection committed in
+	// between, which the API, webhook handlers and reconciler routinely do.
+	dsn += sep + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

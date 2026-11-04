@@ -386,3 +386,35 @@ func TestWithTxRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A transaction that reads and then writes must not fail with SQLITE_BUSY just
+// because another connection committed a write in between (the reconciler and
+// webhook handlers write while API requests run). Write transactions therefore
+// take the write lock when they begin and wait for it (busy_timeout).
+func TestWithTxReadThenWriteSurvivesConcurrentWriter(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	seed(t, s, 1)
+
+	err := s.WithTx(ctx, func(tx Store) error {
+		if _, err := tx.GetInstallation(ctx, 1); err != nil {
+			return err
+		}
+		done := make(chan error, 1)
+		go func() {
+			done <- s.UpsertInstallation(ctx, model.Installation{ID: 2, AccountLogin: "other", AccountID: 2, AccountType: "Organization"})
+		}()
+		select {
+		case err := <-done: // the other writer got in first
+			if err != nil {
+				return err
+			}
+		case <-time.After(300 * time.Millisecond): // it is waiting for us, as it should
+			t.Cleanup(func() { <-done })
+		}
+		return tx.UpsertInstallation(ctx, model.Installation{ID: 3, AccountLogin: "third", AccountID: 3, AccountType: "Organization"})
+	})
+	if err != nil {
+		t.Fatalf("read-then-write transaction: %v", err)
+	}
+}
