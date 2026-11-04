@@ -51,8 +51,11 @@ func TestLoginFlowAndSeededRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.Request.URL.Path != "/repos/acme/web" && resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("final = %s (%d)", resp.Request.URL, resp.StatusCode)
+	// The dev server serves no SPA, so the landing page itself is a 404; what
+	// matters is that the login chain ended on the requested path.
+	t.Logf("final = %s (%d)", resp.Request.URL, resp.StatusCode)
+	if resp.Request.URL.Path != "/repos/acme/web" {
+		t.Fatalf("final = %s (%d), want path /repos/acme/web", resp.Request.URL, resp.StatusCode)
 	}
 	if len(jar.Cookies(mustURL(t, ts.URL))) == 0 {
 		t.Fatal("no session cookie stored")
@@ -78,6 +81,33 @@ func TestLoginFlowAndSeededRepos(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("acme/web not listed: %+v", repos.Items)
+	}
+}
+
+// The web client (web/src/api/queryClient.ts) tells a CSRF rejection from a
+// permission denial by matching /X-Requested-With/i against the 403 message.
+// web/src/api/csrfMessage.test.ts pins the same literal on the other side.
+func TestCSRFRejectionMessage(t *testing.T) {
+	ts := startServer(t, "admin")
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	resp, err := c.Get(ts.URL + "/api/v1/auth/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	resp, err = c.Post(ts.URL+"/api/v1/auth/logout", "application/json", nil) // no X-Requested-With
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct{ Code, Message string }
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusForbidden || body.Message != "missing X-Requested-With header" {
+		t.Fatalf("got %d %+v, want 403 with message %q", resp.StatusCode, body, "missing X-Requested-With header")
 	}
 }
 
