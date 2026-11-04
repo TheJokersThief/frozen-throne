@@ -12,13 +12,22 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
-	// Wired into newReconciler once the server exists.
-	_ = flag.Duration("reconcile-interval", defaultReconcileInterval, "how often to re-check every repo to heal missed webhooks")
+	check := flag.Bool("healthcheck", false, "probe /healthz on the local listener and exit 0/1 (for container healthchecks)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "frozen-throne: server not implemented yet (scaffold)")
-	os.Exit(1)
+	if *check {
+		if err := healthcheck(); err != nil {
+			fmt.Fprintln(os.Stderr, "unhealthy:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// Settings come from FT_* environment variables (see docs/configuration.md).
+	if err := serve(); err != nil {
+		fmt.Fprintln(os.Stderr, "frozen-throne:", err)
+		os.Exit(1)
+	}
 }
