@@ -286,3 +286,26 @@ func (s *Server) routes() {
 	s.handle("GET /public/repos/{owner}/{repo}/status", false, s.getPublicStatus)
 	s.handle("GET /public/repos/{owner}/{repo}/badge.svg", false, s.getPublicBadge)
 }
+
+// Trigger is the subset of the reconciler the API needs. *reconcile.Reconciler
+// implements it.
+type Trigger interface {
+	Repo(repoID int64)
+	Installation(installationID int64)
+}
+
+type triggerNotifier struct{ t Trigger }
+
+// NewTriggerNotifier adapts a reconciler into a ChangeNotifier: repo-scoped
+// changes (including a bypass on one PR) re-evaluate that repo, org-wide
+// changes re-evaluate the installation.
+func NewTriggerNotifier(t Trigger) ChangeNotifier { return triggerNotifier{t} }
+
+// FreezeStateChanged implements ChangeNotifier.
+func (n triggerNotifier) FreezeStateChanged(_ context.Context, ev FreezeChange) {
+	if ev.RepoID != nil {
+		n.t.Repo(*ev.RepoID)
+		return
+	}
+	n.t.Installation(ev.InstallationID)
+}
