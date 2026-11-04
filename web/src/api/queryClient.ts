@@ -2,6 +2,13 @@ import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { ApiError } from "./client";
 import { apiEvents, session } from "./session";
 
+/**
+ * The Go API rejects a mutation without the CSRF header with 403 and the
+ * message "missing X-Requested-With header" (internal/api/server.go). Pinned on
+ * both sides: csrfMessage.test.ts here, TestCSRFRejectionMessage in cmd/dev-server.
+ */
+export const isCsrfRejection = (message: string): boolean => /X-Requested-With/i.test(message);
+
 /** Auth/permission/visibility failures are answers, not glitches: never retry them. */
 export function shouldRetry(failureCount: number, error: unknown): boolean {
   if (error instanceof ApiError && [401, 403, 404].includes(error.status)) return false;
@@ -37,7 +44,7 @@ export function createQueryClient(opts: { retry?: boolean; staleTime?: number; r
         if (error.status === 401) {
           if (mutation.options.mutationKey?.[0] !== "logout") expire();
         } else if (error.status === 403 && mutation.options.mutationKey?.[0] !== "logout") {
-          if (/X-Requested-With/i.test(error.message)) {
+          if (isCsrfRejection(error.message)) {
             apiEvents.emit({ type: "rejected", message: error.message });
             return;
           }

@@ -147,7 +147,6 @@ const SPEC_GAPS: Record<string, number[]> = {
   "POST /orgs/{org}/freeze": [400],
   "PUT /repos/{owner}/{repo}/public-status": [400], // missing enabled / bad JSON
   "DELETE /repos/{owner}/{repo}/pulls/{number}/bypass": [400], // number < 1
-  "DELETE /schedules/{id}": [],
 };
 
 /* -------------------------------------------------------------- harness */
@@ -906,7 +905,15 @@ describe("public endpoints", () => {
 /* ------------------------------------------------- every response covered */
 
 describe("coverage of declared responses", () => {
-  it("every declared status of every mocked operation was exercised by this file", () => {
+  it("every declared status of every mocked operation was exercised by this file", ({ task, skip }) => {
+    // Under -t / .only / .skip the other tests did not all run, so hits is partial.
+    const all: { mode: string; type: string; tasks?: unknown[] }[] = [];
+    const walk = (t: { mode: string; type: string; tasks?: unknown[] }) => {
+      all.push(t);
+      (t.tasks ?? []).forEach((c) => walk(c as typeof t));
+    };
+    walk(task.file as never);
+    if (all.some((t) => t.type === "test" && t.mode !== "run")) skip("not every test in this file ran");
     const missing: string[] = [];
     for (const op of ops) {
       if (op.key in EXCLUDED_OPS) continue;
