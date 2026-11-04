@@ -287,6 +287,12 @@ func (s *Service) ReevaluateRepo(ctx context.Context, repoID int64) (ReevaluateR
 	if repo.RemovedAt != nil || repo.Archived {
 		return res, nil
 	}
+	// Snapshot the stored-open PRs before asking GitHub: a PR that a webhook
+	// opens while the listing is in flight is then never mistaken for closed.
+	stored, err := s.st.ListOpenPullRequests(ctx, repo.ID)
+	if err != nil {
+		return res, err
+	}
 	prs, err := s.api.ListOpenPullRequests(ctx, repo.InstallationID, repo.Owner, repo.Name)
 	if err != nil {
 		return res, fmt.Errorf("list open PRs of %s: %w", repo.FullName(), err)
@@ -304,11 +310,6 @@ func (s *Service) ReevaluateRepo(ctx context.Context, repoID int64) (ReevaluateR
 		if wrote {
 			res.Updated++
 		}
-	}
-	stored, err := s.st.ListOpenPullRequests(ctx, repo.ID)
-	if err != nil {
-		errs = append(errs, err)
-		return res, errors.Join(errs...)
 	}
 	for _, p := range stored {
 		if live[p.Number] {

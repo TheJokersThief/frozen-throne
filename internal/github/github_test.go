@@ -598,3 +598,37 @@ func TestNewServiceValidation(t *testing.T) {
 		t.Error("want error")
 	}
 }
+
+// hookAPI runs a callback while a PR listing is in flight, like a webhook
+// arriving between the listing and the sweep.
+type hookAPI struct {
+	API
+	onList func()
+}
+
+func (h hookAPI) ListOpenPullRequests(ctx context.Context, inst int64, owner, repo string) ([]PullSummary, error) {
+	out, err := h.API.ListOpenPullRequests(ctx, inst, owner, repo)
+	h.onList()
+	return out, err
+}
+
+func TestReevaluateKeepsPRsOpenedDuringListing(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.seed()
+	e.freeze()
+	e.svc.api = hookAPI{API: e.svc.api, onList: func() {
+		// PR 12 opens (webhook) and is bypassed after the listing was taken.
+		must(t, e.st.UpsertPullRequest(ctx, model.PullRequest{RepoID: 55, Number: 12, HeadSHA: "n", State: model.PROpen}))
+		_, err := e.st.CreateBypass(ctx, model.Bypass{RepoID: 55, PRNumber: 12, Reason: "r"})
+		must(t, err)
+	}}
+	res, err := e.svc.ReevaluateRepo(ctx, 55)
+	must(t, err)
+	if res.Closed != 0 {
+		t.Fatalf("closed a PR that opened during the listing: %+v", res)
+	}
+	if _, err := e.st.ActiveBypass(ctx, 55, 12); err != nil {
+		t.Fatalf("bypass wiped: %v", err)
+	}
+}
