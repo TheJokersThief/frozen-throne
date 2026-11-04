@@ -287,4 +287,170 @@ func TestBypassEndsWhenWindowEnds(t *testing.T) {
 	if l.activeBypass(7) || l.bypassEndReason(7) != model.BypassEndedThawed {
 		t.Fatal("window end did not clear bypass")
 	}
+	ended, err := l.st.ListAudit(context.Background(), store.AuditFilter{Action: model.AuditBypassEnd})
+	if err != nil || len(ended) != 1 || ended[0].PRNumber == nil || *ended[0].PRNumber != 7 ||
+		ended[0].Details != `{"end_reason":"thawed"}` || ended[0].CreatedAt.IsZero() || ended[0].RepoID == nil {
+		t.Fatalf("expiry audit = %+v (%v)", ended, err)
+	}
+}
+
+func (l *life) mergeGroup(pr int, headSHA string) {
+	l.t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"action":       "checks_requested",
+		"installation": map[string]any{"id": 1, "account": map[string]any{"login": "acme", "id": 100, "type": "Organization"}},
+		"repository":   map[string]any{"id": 10, "name": "web", "owner": map[string]any{"login": "acme"}, "default_branch": "main"},
+		"merge_group":  map[string]any{"head_sha": headSHA, "head_ref": fmt.Sprintf("refs/heads/gh-readonly-queue/main/pr-%d-0123abcd", pr)},
+	})
+	mac := hmac.New(sha256.New, []byte(hookSecret))
+	mac.Write(body)
+	req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(string(body)))
+	req.Header.Set("X-GitHub-Event", "merge_group")
+	req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	rec := httptest.NewRecorder()
+	l.svc.ServeHTTP(rec, req)
+	if rec.Code != 204 {
+		l.t.Fatalf("merge_group: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestMergeGroupRespectsBypass(t *testing.T) {
+	l := newLife(t)
+	bob := l.login("bob")
+	l.expect(l.do(bob, "POST", "/repos/acme/web/freeze", `{"reason":"release"}`), 201)
+	l.expect(l.do(bob, "POST", "/repos/acme/web/pulls/7/bypass", `{"reason":"urgent"}`), 201)
+
+	l.mergeGroup(7, "mg-7")
+	l.mergeGroup(8, "mg-8")
+	if ck := l.gh.check("mg-7"); ck.conclusion != "success" || !strings.Contains(ck.summary, "urgent") {
+		t.Fatalf("bypassed PR in queue: %+v", ck)
+	}
+	if ck := l.gh.check("mg-8"); ck.conclusion != "failure" {
+		t.Fatalf("other PR in queue: %+v", ck)
+	}
+	l.expect(l.do(bob, "DELETE", "/repos/acme/web/pulls/7/bypass", nil), 204)
+	l.mergeGroup(7, "mg-7b")
+	if ck := l.gh.check("mg-7b"); ck.conclusion != "failure" {
+		t.Fatalf("revoked bypass in queue: %+v", ck)
+	}
+}
+
+func TestAuditTrailComplete(t *testing.T) {
+	l := newLife(t)
+	alice, bob, carol := l.login("alice"), l.login("bob"), l.login("carol")
+	now := l.clk.Now()
+
+	l.expect(l.do(alice, "POST", "/orgs/acme/freeze", `{"reason":"quarter end"}`), 201)
+	var sc struct{ ID int64 }
+	l.expect(l.do(bob, "POST", "/repos/acme/web/schedules", map[string]any{
+		"name": "night", "kind": "one_off", "timezone": "UTC", "reason": "deploy window",
+		"starts_at": now.Add(time.Hour), "ends_at": now.Add(2 * time.Hour),
+	}), 201).decode(&sc)
+	l.expect(l.do(bob, "PUT", fmt.Sprintf("/schedules/%d", sc.ID), map[string]any{
+		"name": "night2", "kind": "one_off", "timezone": "UTC", "reason": "deploy window",
+		"starts_at": now.Add(time.Hour), "ends_at": now.Add(2 * time.Hour), "enabled": true,
+	}), 200)
+	l.expect(l.do(bob, "DELETE", fmt.Sprintf("/schedules/%d", sc.ID), nil), 204)
+	l.expect(l.do(bob, "POST", "/repos/acme/web/freeze", `{"reason":"web release"}`), 201)
+	l.expect(l.do(bob, "POST", "/repos/acme/web/pulls/7/bypass", `{"reason":"hotfix"}`), 201)
+	l.expect(l.do(carol, "DELETE", "/repos/acme/web/pulls/7/bypass", nil), 403)
+	l.expect(l.do(bob, "DELETE", "/repos/acme/web/pulls/7/bypass", nil), 204)
+	l.expect(l.do(bob, "POST", "/repos/acme/web/pulls/8/bypass", `{"reason":"second"}`), 201)
+	l.expect(l.do(bob, "DELETE", "/repos/acme/web/freeze", nil), 200)
+	// Org freeze still applies: bypass 8 survives the repo thaw, ends on org thaw.
+	l.expect(l.do(alice, "DELETE", "/orgs/acme/freeze", nil), 200)
+
+	var out struct {
+		Items      []auditDTO `json:"items"`
+		NextBefore int64      `json:"next_before"`
+	}
+	l.expect(l.do(alice, "GET", "/audit?limit=100", nil), 200).decode(&out)
+	type key struct {
+		action, scope, actor, reason string
+		pr                           int
+	}
+	got := map[key]auditDTO{}
+	for _, it := range out.Items {
+		pr := 0
+		if it.PRNumber != nil {
+			pr = *it.PRNumber
+		}
+		got[key{it.Action, it.Scope, it.Actor, it.Reason, pr}] = it
+		if it.CreatedAt.IsZero() || it.Actor == "" && it.Action != "bypass.end" || it.Org != "acme" {
+			t.Errorf("incomplete entry: %+v", it)
+		}
+	}
+	want := []key{
+		{"freeze", "org", "alice", "quarter end", 0},
+		{"schedule.create", "", "bob", "deploy window", 0},
+		{"schedule.update", "", "bob", "deploy window", 0},
+		{"schedule.delete", "", "bob", "deploy window", 0},
+		{"freeze", "repo", "bob", "web release", 0},
+		{"bypass.create", "", "bob", "hotfix", 7},
+		{"bypass.end", "", "bob", "", 7},
+		{"bypass.create", "", "bob", "second", 8},
+		{"thaw", "repo", "bob", "", 0},
+		{"thaw", "org", "alice", "", 0},
+		{"bypass.end", "", "alice", "", 8},
+	}
+	for _, w := range want {
+		if _, ok := got[w]; !ok {
+			t.Errorf("missing audit entry %+v", w)
+		}
+	}
+	if len(out.Items) != len(want) {
+		t.Errorf("got %d entries, want %d", len(out.Items), len(want))
+	}
+	if d := got[key{"bypass.end", "", "bob", "", 7}].Details["end_reason"]; d != "revoked" {
+		t.Errorf("revoke details = %v", d)
+	}
+	if d := got[key{"bypass.end", "", "alice", "", 8}].Details["end_reason"]; d != "thawed" {
+		t.Errorf("thaw details = %v", d)
+	}
+	if got[key{"freeze", "repo", "bob", "web release", 0}].Repo != "acme/web" {
+		t.Errorf("repo scope missing")
+	}
+
+	// Filters.
+	count := func(q string) int {
+		var o struct{ Items []auditDTO }
+		l.expect(l.do(alice, "GET", "/audit?"+q, nil), 200).decode(&o)
+		return len(o.Items)
+	}
+	if n := count("action=bypass.create"); n != 2 {
+		t.Errorf("action filter: %d", n)
+	}
+	if n := count("actor=alice"); n != 3 {
+		t.Errorf("actor filter: %d", n)
+	}
+	if n := count("repo=acme/web&action=thaw"); n != 1 {
+		t.Errorf("repo filter: %d", n)
+	}
+	if n := count("org=acme"); n != len(want) {
+		t.Errorf("org filter: %d", n)
+	}
+
+	// Pagination walks newest to oldest without gaps or repeats.
+	seen := map[int64]bool{}
+	before := ""
+	for pages := 0; pages < 10; pages++ {
+		var o struct {
+			Items      []auditDTO `json:"items"`
+			NextBefore int64      `json:"next_before"`
+		}
+		l.expect(l.do(alice, "GET", "/audit?limit=4"+before, nil), 200).decode(&o)
+		for _, it := range o.Items {
+			if seen[it.ID] {
+				t.Fatalf("entry %d repeated", it.ID)
+			}
+			seen[it.ID] = true
+		}
+		if o.NextBefore == 0 {
+			break
+		}
+		before = fmt.Sprintf("&before=%d", o.NextBefore)
+	}
+	if len(seen) != len(want) {
+		t.Errorf("paged %d entries, want %d", len(seen), len(want))
+	}
 }
